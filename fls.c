@@ -12,8 +12,8 @@
 #include <sys/select.h>
 
 #define PROGRAM_NAME "fls"
-#define FILEPATH_MAX 200
-#define STACK_MAX 10
+#define FILEPATH_MAX 2000
+#define STACK_MAX 100
 #define MSG_MAX 100
 #define MSG_SUCCESS "okay"
 #define MSG_ERROR "error"
@@ -666,8 +666,7 @@ void do_action(enum ActionType action, int s, int argc, char **argv) {
 
 bool daemon_serve(int s, char *cmd) {
   /* do cmd for client connected on s */
-  /* TODO: store file stack in linked list */
-  static char stack[STACK_MAX][FILEPATH_MAX];
+  static char *stack[STACK_MAX];
   static int stackind=0;
   char buf[FILEPATH_MAX];
   bool keep_running=true;
@@ -690,6 +689,7 @@ bool daemon_serve(int s, char *cmd) {
 	strcpy(buf, MSG_ERR_LENGTH);
       } else {
 	status = MSG_SUCCESS;
+	stack[stackind] = xmalloc(strlen(buf) +1);
 	strcpy(stack[stackind++], buf);
 	printf("daemon: PUSH `%s'\n", buf);
       }
@@ -701,6 +701,7 @@ bool daemon_serve(int s, char *cmd) {
     char *status;
     if( stackind > 0 ) {
       sprintf(buf, "%s", stack[--stackind]);
+      free(stack[stackind]);
       printf("daemon: POP `%s'\n", buf);
       status = MSG_SUCCESS;
     } else {
