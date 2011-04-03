@@ -238,6 +238,17 @@ bool readwait(int s, float timeout) {
   return false;
 }
 
+bool read_status_okay(int s) {
+  /* reads status message from socket <s>;
+     returns true if successfully read MSG_SUCCESS,
+     false otherwise */
+  char buf[MSG_MAX];
+  if( soc_r(s, buf, MSG_MAX) > 0 && strcmp(buf, MSG_SUCCESS) == 0 )
+    return true;
+  return false;
+}
+
+
 /*
  * signal functions
  */
@@ -352,14 +363,12 @@ int client_connect() {
 
 void push(int s, char *file) {
   /* instructs daemon to push file onto stack, terminates on error */
-  char buf[FILEPATH_MAX], status[MSG_MAX], *fullpath, *prefix="push:";
+  char buf[FILEPATH_MAX], *fullpath, *prefix="push:";
+  int okay;
 
   soc_w(s, "push");
-  if( soc_r(s, status, MSG_MAX) <= 0 ) {
-    fprintf(stderr, "%s quitting for read error\n", prefix);
-    exit(EXIT_FAILURE);
-  }
-  if( strcmp(status, MSG_SUCCESS) != 0 ) {
+  okay = read_status_okay(s);
+  if( !okay ) {
     if( soc_r(s, buf, FILEPATH_MAX) <= 0 ) {
       fprintf(stderr, "%s quitting for read error\n", prefix);
       exit(EXIT_FAILURE);
@@ -368,18 +377,19 @@ void push(int s, char *file) {
     return;
   }
 
-  fullpath = realpath(file, NULL);
+  fullpath = realpath(file, NULL); /* malloc()s fullpath */
   if( fullpath == NULL ) {
     perror("realpath");
     exit(EXIT_FAILURE);
   }
   soc_w(s, fullpath);
 
-  if( soc_r(s, status, MSG_MAX) <= 0 || soc_r(s, buf, FILEPATH_MAX) <= 0 ) {
+  okay = read_status_okay(s);
+  if( soc_r(s, buf, FILEPATH_MAX) <= 0 ) {
     fprintf(stderr, "%s quitting for read error\n", prefix);
     exit(EXIT_FAILURE);
   }
-  if( strcmp(status, MSG_SUCCESS) != 0 ) {
+  if( !okay ) {
     printf("received error `%s' (stack state debatable)\n", buf);
   } else {
     if( strcmp(buf, fullpath) != 0 ) {
@@ -393,14 +403,16 @@ void push(int s, char *file) {
 
 bool drop(int s) {
   /* instructs daemon to pop a file from the stack, returns true if it could */
-  char status[MSG_MAX], buf[FILEPATH_MAX], *prefix="drop:";
+  char buf[FILEPATH_MAX], *prefix="drop:";
+  int okay;
 
   soc_w(s, "pop");
-  if( soc_r(s, status, MSG_MAX) <= 0 || soc_r(s, buf, FILEPATH_MAX) <= 0 ) {
+  okay = read_status_okay(s);
+  if( soc_r(s, buf, FILEPATH_MAX) <= 0 ) {
     fprintf(stderr, "%s quitting for read error\n", prefix);
     exit(EXIT_FAILURE);
   }
-  if( strcmp(status, MSG_SUCCESS) == 0 ) {
+  if( okay ) {
     printf("Popped `%s'\n", buf);
     return true;
   } else {
@@ -520,13 +532,8 @@ void action_pop(int s, enum ActionType action) {
   int c;
 
   soc_w(s, "peek");
-  if( soc_r(s, buf, MSG_MAX) <= 0 ) {
-    fprintf(stderr, "%s quitting for read error (status) (%s)\n", prefix, stack_state);
-    exit(EXIT_FAILURE);
-  }
-  if( strcmp(buf, MSG_SUCCESS) != 0 ) {
+  if( !read_status_okay(s) )
     remote_error = true;
-  }
   if( soc_r(s, buf, FILEPATH_MAX) <= 0 ) {
     fprintf(stderr, "%s quitting for read error (%s)\n", prefix, stack_state);
     exit(EXIT_FAILURE);
@@ -566,7 +573,7 @@ void action_pop(int s, enum ActionType action) {
   }
   soc_w(s, "pop");
   stack_state = "stack state debatable";
-  if( soc_r(s, buf, MSG_MAX) <= 0 || strcmp(buf, MSG_SUCCESS) != 0 ) {
+  if( !read_status_okay(s) ) {
     fprintf(stderr, "%s could not confirm pop from stack (%s)\n", prefix, stack_state);
     exit(EXIT_FAILURE);
   }
