@@ -209,7 +209,7 @@ void soc_w(int s, char *buf) {
   int len, n;
 
   if( am_daemon )
-    prefix = "daemon:send";
+    prefix = "daemon: send";
   else
     prefix = "send";
   if( verbose )
