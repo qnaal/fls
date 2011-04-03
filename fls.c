@@ -729,7 +729,7 @@ bool daemon_serve(int s, char *cmd) {
     sprintf(buf, "%d", stackind);
     soc_w(s, buf);
     for( i = stackind -1; i >= 0; i-- ) {
-      soc_w(s, (char*)(stack + i));
+      soc_w(s, stack[i]);
     }
 
   } else if( strcmp(cmd, "stop") == 0 ) {
