@@ -117,12 +117,8 @@ void set_soc_path() {
   /* generate soc_path from user name */
   char *username, *tmpdir="/tmp/";
   int size;
-  uid_t uid;
-  struct passwd *pw;
 
-  uid = getuid();
-  pw = getpwuid(uid);
-  username = pw->pw_name;
+  username = getenv("USER");
 
   size = strlen(tmpdir) + strlen(username) + strlen(PROGRAM_NAME) +1;
   soc_path = xmalloc(size);
