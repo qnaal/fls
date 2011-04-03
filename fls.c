@@ -51,6 +51,8 @@ Push FILE onto the stack, or perform action ACTION.\n\
 \n\
 The files in the stack are not altered until being popped, \n\
 and even then, only if they are to be moved.\n\
+");
+  printf("\
 \n\
 Actions:\n\
   -c    COPY\n\
@@ -65,6 +67,8 @@ Actions:\n\
           terminate the stack daemon, losing the contents of the stack\n\
   -h    HELP\n\
           display usage information, and then exit\n\
+");
+  printf("\
 \n\
 All but the last entered action are ignored.\n\
 \n\
