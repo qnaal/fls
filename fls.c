@@ -44,10 +44,10 @@ bool am_daemon=false;
 void usage(int status) {
   printf("\
 Usage: %s [ACTION]\n\
-  or:  %s [FILE]\n\
+  or:  %s [FILE]...\n\
 ", PROGRAM_NAME, PROGRAM_NAME);
   printf("\
-Push FILE onto the stack, or perform action ACTION.\n\
+Push FILEs onto the stack, or perform action ACTION.\n\
 \n\
 The files in the stack are not altered until being popped, \n\
 and even then, only if they are to be moved.\n\
@@ -74,7 +74,7 @@ All but the last entered action are ignored.\n\
 \n\
 If no args are provided, the default action is PRINT.\n\
 \n\
-If FILE is provided, push it onto the stack.\n\
+If FILEs are provided, push them onto the stack.\n\
 ");
   exit(status);
 }
@@ -619,13 +619,15 @@ void interactive(int s) {
 
 void do_action(enum ActionType action, int s, int argc, char **argv) {
   /* invokes the proper handler for action, passing args as necessary */
+  int i;
 
   switch(action) {
   case PUSH:
     if( verbose )
       printf("push\n");
-    /* TODO: push all of these args, not just the first one */
-    push(s, argv[0]);
+    for( i = 0; i < argc; i++ ){
+      push(s, argv[i]);
+    }
     break;
   case DROP:
     if( verbose )
