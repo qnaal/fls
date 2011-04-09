@@ -21,15 +21,19 @@
 #define MSG_ERR_STACK_FULL "file stack full"
 #define MSG_ERR_LENGTH "file path too long"
 
-enum ActionType{
-  NOTHING,
-  PUSH,
-  DROP,
-  PRINT,
-  COPY,
-  MOVE,
-  INTERACTIVE,
-  STOP,
+struct Action {
+  enum {
+    NOTHING,
+    PUSH,
+    DROP,
+    PRINT,
+    COPY,
+    MOVE,
+    INTERACTIVE,
+    STOP,
+  } type;
+  int num;
+  void *ptr;
 };
 
 char *soc_path;
@@ -43,7 +47,7 @@ bool am_daemon=false;
 
 void usage(int status) {
   printf("\
-Usage: %s [ACTION]\n\
+Usage: %s <ACTION> [OPTION...]\n\
   or:  %s [FILE]...\n\
 ", PROGRAM_NAME, PROGRAM_NAME);
   printf("\
@@ -67,6 +71,12 @@ Actions:\n\
           terminate the stack daemon, losing the contents of the stack\n\
   -h    HELP\n\
           display usage information, and then exit\n\
+");
+  printf("\
+\n\
+Options:\n\
+  -n N  (available for COPY, MOVE, and DROP)\n\
+          perform action to the top N files on the stack\n\
 ");
   printf("\
 \n\
@@ -294,33 +304,40 @@ void sig_ignore(int signum) {
  * client functions
  */
 
-enum ActionType handle_options(int argc, char **argv) {
+struct Action handle_options(int argc, char **argv) {
   /* returns the proper action to take */
+  struct Action action = {NOTHING, 1, NULL};
   int c;
-  enum ActionType action = NOTHING;
 
-  while( (c = getopt(argc, argv, "cmdpiqvh")) != -1 ) {
+  while( (c = getopt(argc, argv, "cmdpiqvn:h")) != -1 ) {
     switch (c) {
     case 'c':
-      action = COPY;
+      action.type = COPY;
       break;
     case 'm':
-      action = MOVE;
+      action.type = MOVE;
       break;
     case 'd':
-      action = DROP;
+      action.type = DROP;
       break;
     case 'p':
-      action = PRINT;
+      action.type = PRINT;
       break;
     case 'i':
-      action = INTERACTIVE;
+      action.type = INTERACTIVE;
       break;
     case 'q':
-      action = STOP;
+      action.type = STOP;
       break;
     case 'v':
       verbose++;
+      break;
+    case 'n':
+      action.num = atoi(optarg);
+      if( action.num <= 0 ) {
+	fprintf(stderr, "invalid argument `%s' for option `%s'\n", optarg, argv[optind]);
+	usage(EXIT_FAILURE);
+      }
       break;
     case 'h':
       usage(EXIT_SUCCESS);
@@ -331,7 +348,7 @@ enum ActionType handle_options(int argc, char **argv) {
   if( optind < argc ) {
     if( verbose )
       printf("arg provided\n");
-    action = PUSH;
+    action.type = PUSH;
   }
   return action;
 }
@@ -441,13 +458,13 @@ void print(int s) {
   }
 }
 
-char **cmd_gen(enum ActionType action, char *source, char *dest, char **verb) {
+char **cmd_gen(struct Action action, char *source, char *dest, char **verb) {
   /* generates the command to run to perform "action" between "source" and "dest",
      returns the command in the form of null-terminiated argv, and sets "verb" to the proper verb */
   char *prefix = "cmd_gen:";
   char **argv;
 
-  switch (action) {
+  switch (action.type) {
   case COPY:
     {
       char *array_init[] = {
@@ -523,12 +540,12 @@ int action_exec(char **argv) {
   return -1;
 }
 
-void action_pop(int s, enum ActionType action) {
+void action_pop(int s, struct Action action, bool interactive) {
   /* instructs daemon to pop a file from the stack,
      and "action"s that file to the current working dir */
   char *prefix="action_pop:", *stack_state="stack not altered";
   char buf[FILEPATH_MAX], *source, dest[FILEPATH_MAX], **execargv, *verb;
-  bool remote_error=false;
+  bool remote_error=false, cancel=false;
   int c;
 
   soc_w(s, "peek");
@@ -559,10 +576,26 @@ void action_pop(int s, enum ActionType action) {
 
   execargv = cmd_gen(action, source, dest, &verb);
 
-  /* TODO: add 'd' option for "drop from stack but don't do anything with the value" */
-  printf("%s `%s' to `%s' [Yn]?", verb, source, dest);
-  c = getchar();
-  if( c == 'n' ) {
+  if( interactive ) {
+    if( action.num > 1 ) {
+      printf("%s %d files to `%s' [Yn]?", verb, action.num, dest);
+      c = getchar();
+      if( c == 'n' ) {
+	cancel = true;
+      } else
+	printf("%s `%s' to `%s'\n", verb, source, dest);
+    } else {
+      /* TODO: add 'd' option for "drop from stack but don't do anything with the value" */
+      printf("%s `%s' to `%s' [Yn]?", verb, source, dest);
+      c = getchar();
+      if( c == 'n' ) {
+	cancel = true;
+      }
+    }
+  } else { 			/* !interactive */
+    printf("%s `%s' to `%s'\n", verb, source, dest);
+  }
+  if( cancel ) {
     printf("%s canceled by user (%s)\n", verb, stack_state);
     exit(EXIT_FAILURE);
   }
@@ -571,13 +604,16 @@ void action_pop(int s, enum ActionType action) {
     fprintf(stderr, "%s copy unsuccessful, aborting... (%s)\n", prefix, stack_state);
     exit(EXIT_FAILURE);
   }
+  free(execargv);
   soc_w(s, "pop");
   stack_state = "stack state debatable";
   if( !read_status_okay(s) ) {
     fprintf(stderr, "%s could not confirm pop from stack (%s)\n", prefix, stack_state);
     exit(EXIT_FAILURE);
   }
-  free(execargv);
+  soc_r(s, buf, FILEPATH_MAX);
+  if( --(action.num) > 0 )
+    action_pop(s, action, false);
 }
 
 void interactive(int s) {
@@ -617,22 +653,25 @@ void interactive(int s) {
   }
 }
 
-void do_action(enum ActionType action, int s, int argc, char **argv) {
+void do_action(struct Action action, int s) {
   /* invokes the proper handler for action, passing args as necessary */
   int i;
 
-  switch(action) {
+  switch(action.type) {
   case PUSH:
     if( verbose )
       printf("push\n");
-    for( i = 0; i < argc; i++ ){
-      push(s, argv[i]);
+    for( i = 0; i < action.num; i++ ) {
+      push(s, ((char**)action.ptr)[i]);
     }
     break;
   case DROP:
     if( verbose )
       printf("drop\n");
-    drop(s);
+    for( i = 0; i < action.num; i++ ) {
+      if( !drop(s) )
+	printf("popped %d\n", i);
+    }
     break;
   case NOTHING:
   case PRINT:
@@ -644,7 +683,7 @@ void do_action(enum ActionType action, int s, int argc, char **argv) {
   case MOVE:
     if( verbose )
       printf("action_pop\n");
-    action_pop(s, action);
+    action_pop(s, action, true);
     break;
   case INTERACTIVE:
     if( verbose )
@@ -802,7 +841,7 @@ void daemon_run(int soc_listen) {
 int main(int argc, char **argv) {
   int soc_listen;
   struct sockaddr_un local;
-  enum ActionType action = handle_options(argc, argv);
+  struct Action action = handle_options(argc, argv);
 
   set_soc_path();
   sig_block(SIGUSR1);
@@ -857,10 +896,8 @@ int main(int argc, char **argv) {
   }
 
   int s = client_connect();
-  int action_argc = argc - optind;
-  char **action_argv = argv + optind;
 
-  do_action(action, s, action_argc, action_argv);
+  do_action(action, s);
   close(s);
   if( verbose )
     printf("Client exit\n");
