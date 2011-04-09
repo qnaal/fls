@@ -6,7 +6,9 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <pwd.h>
+#include <libgen.h>
 #include <sys/un.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
 #include <sys/select.h>
@@ -47,7 +49,7 @@ bool am_daemon=false;
 
 void usage(int status) {
   printf("\
-Usage: %s <ACTION> [OPTION...]\n\
+Usage: %s <ACTION> [OPTION...] [DEST]\n\
   or:  %s [FILE]...\n\
 ", PROGRAM_NAME, PROGRAM_NAME);
   printf("\
@@ -60,9 +62,9 @@ and even then, only if they are to be moved.\n\
 \n\
 Actions:\n\
   -c    COPY\n\
-          pop a file from the stack, copy it to current dir\n\
+          pop a file from the stack, copy it to DEST or current dir\n\
   -m    MOVE\n\
-          pop a file from the stack, move it to current dir\n\
+          pop a file from the stack, move it to DEST or current dir\n\
   -d    DROP\n\
           pop a file from the stack, print its name\n\
   -p    PRINT\n\
@@ -101,6 +103,17 @@ void *xmalloc(size_t size) {
   return ptr;
 }
 
+char *xstrdup(char *str) {
+  /* loudly fail on memory allocation fail */
+  char *ptr;
+  ptr = strdup(str);
+  if( ptr == NULL ) {
+    fprintf(stderr, "strdup failed\n");
+    exit(EXIT_FAILURE);
+  }
+  return ptr;
+}
+
 void log_output() {
   /* redirect stdout and stderr to <soc_path>.log */
   char *prefix, logfile[FILEPATH_MAX];
@@ -117,6 +130,17 @@ void log_output() {
   }
   setvbuf(stdout, NULL, _IOLBF, 0);
   stderr = stdout;
+}
+
+bool isdir(char *path) {
+  struct stat st;
+  if( stat(path, &st) == -1 ) {
+    perror("stat");
+    exit(EXIT_FAILURE);
+  }
+  if( S_ISDIR(st.st_mode) )
+    return true;
+  return false;
 }
 
 /*
@@ -348,7 +372,24 @@ struct Action handle_options(int argc, char **argv) {
   if( optind < argc ) {
     if( verbose )
       printf("arg provided\n");
-    action.type = PUSH;
+    switch (action.type) {
+    case NOTHING:
+      action.type = PUSH;
+      action.num = argc - optind;
+      action.ptr = &argv[optind];
+      break;
+    case COPY:
+    case MOVE:
+      if( (optind +1) < argc ) {
+	fprintf(stderr, "Too many supplied arguments for requested action\n");
+	usage(EXIT_FAILURE);
+      }
+      action.ptr = argv[optind];
+      break;
+    default:
+      fprintf(stderr, "Requested action does not take arguments");
+      usage(EXIT_FAILURE);
+    }
   }
   return action;
 }
@@ -540,11 +581,45 @@ int action_exec(char **argv) {
   return -1;
 }
 
+char *real_target(char *reltarget) {
+  /* Takes a target file/dir (NULL for cwd),
+     returns malloc()ed canonicalized path.
+     Terminates on failure. */
+  char *target;
+
+  target = realpath((reltarget == NULL ? "." : reltarget), NULL);
+  if( target == NULL ) {
+    if( errno == ENOENT ) {
+      char *dir, *base, *givendir, *givenbase;
+
+      givendir = xstrdup(reltarget);
+      dir = realpath(dirname(givendir), NULL);
+      if( dir == NULL ) {
+	perror("realpath");
+	exit(EXIT_FAILURE);
+      }
+
+      givenbase = xstrdup(reltarget);
+      base = basename(givenbase);
+
+      target = xmalloc(strlen(dir) +1+ strlen(base) +1);
+      sprintf(target, "%s/%s", dir, base);
+      free(givendir);
+      free(dir);
+      free(givenbase);
+    } else {
+      perror("realpath");
+      exit(EXIT_FAILURE);
+    }
+  }
+  return target;
+}
+
 void action_pop(int s, struct Action action, bool interactive) {
   /* instructs daemon to pop a file from the stack,
      and "action"s that file to the current working dir */
   char *prefix="action_pop:", *stack_state="stack not altered";
-  char buf[FILEPATH_MAX], *source, dest[FILEPATH_MAX], **execargv, *verb;
+  char buf[FILEPATH_MAX], *source, *dest, **execargv, *verb;
   bool remote_error=false, cancel=false;
   int c;
 
@@ -564,9 +639,9 @@ void action_pop(int s, struct Action action, bool interactive) {
   }
   source = buf;
 
-  if( getcwd(dest, FILEPATH_MAX) == NULL ) {
-    perror("getcwd");
-    fprintf(stderr, "%s\n", stack_state);
+  dest = real_target(action.ptr);
+  if( action.num > 1 && !isdir(dest) ) {
+    fprintf(stderr, "%s: multi-file target `%s' is not a directory\n", PROGRAM_NAME, dest);
     exit(EXIT_FAILURE);
   }
   if( verbose ) {
@@ -574,7 +649,7 @@ void action_pop(int s, struct Action action, bool interactive) {
     printf("dst: %s\n", dest);
   }
 
-  execargv = cmd_gen(action, source, dest, &verb);
+  execargv = cmd_gen(action, source, dest, &verb); /* copies references, not data */
 
   if( interactive ) {
     if( action.num > 1 ) {
@@ -604,6 +679,7 @@ void action_pop(int s, struct Action action, bool interactive) {
     fprintf(stderr, "%s copy unsuccessful, aborting... (%s)\n", prefix, stack_state);
     exit(EXIT_FAILURE);
   }
+  free(dest);
   free(execargv);
   soc_w(s, "pop");
   stack_state = "stack state debatable";
