@@ -48,17 +48,20 @@ bool am_daemon=false;
  */
 
 void usage(int status) {
-  printf("\
+  if( status != EXIT_SUCCESS ) {
+    fprintf(stderr, "Try `%s -h' for more information.\n", PROGRAM_NAME);
+  } else {
+    printf("\
 Usage: %s <ACTION> [OPTION...] [DEST]\n\
   or:  %s [FILE]...\n\
 ", PROGRAM_NAME, PROGRAM_NAME);
-  printf("\
+    printf("\
 Push FILEs onto the stack, or perform action ACTION.\n\
 \n\
 The files in the stack are not altered until being popped, \n\
 and even then, only if they are to be moved.\n\
 ");
-  printf("\
+    printf("\
 \n\
 Actions:\n\
   -c    COPY\n\
@@ -74,13 +77,13 @@ Actions:\n\
   -h    HELP\n\
           display usage information, and then exit\n\
 ");
-  printf("\
+    printf("\
 \n\
 Options:\n\
   -n N  (available for COPY, MOVE, and DROP)\n\
           perform action to the top N files on the stack\n\
 ");
-  printf("\
+    printf("\
 \n\
 All but the last entered action are ignored.\n\
 \n\
@@ -88,6 +91,7 @@ If no args are provided, the default action is PRINT.\n\
 \n\
 If FILEs are provided, push them onto the stack.\n\
 ");
+  }
   exit(status);
 }
 
