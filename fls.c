@@ -22,9 +22,10 @@
 #define MSG_ERR_STACK_EMPTY "file stack empty"
 #define MSG_ERR_STACK_FULL "file stack full"
 #define MSG_ERR_LENGTH "file path too long"
+#define EXEC_ARG_MAX 6
 
 struct Action {
-  enum {
+  enum ActionType {
     NOTHING,
     PUSH,
     DROP,
@@ -38,6 +39,29 @@ struct Action {
   void *ptr;
 };
 
+struct ActionDef {
+  enum ActionType type;
+  char *verb;
+  char *argv[EXEC_ARG_MAX];
+  int source_slot, dest_slot;
+};
+
+struct ActionDef actions[] = {
+  {PUSH, "push", {NULL}, 0, 0},
+  {DROP, "drop", {NULL}, 0, 0},
+  {PRINT, "print", {NULL}, 0, 0},
+  {COPY,
+   "copy",
+   {"/bin/cp", "-r", "--", NULL, NULL, NULL},
+   3, 4},
+  {MOVE,
+   "move",
+   {"/bin/mv", "--", NULL, NULL, NULL},
+   2, 3},
+  {INTERACTIVE, "interactive mode", {NULL}, 0, 0},
+  {STOP, "terminate daemon", {NULL}, 0, 0},
+  {NOTHING}
+};
 char *soc_path;
 int verbose=0;
 bool am_daemon=false;
@@ -332,6 +356,28 @@ void sig_ignore(int signum) {
  * client functions
  */
 
+struct ActionDef *action_def(enum ActionType type) {
+  /* Finds the ActionDef matching <type>.
+     Returns a pointer to that ActionDef, or NULL on failure to match. */
+  struct ActionDef *def=actions;
+  while( def->verb != NULL && def->type != type ) {
+    def++;
+  }
+  if( def->verb == NULL )
+    return NULL;
+  return def;
+}
+
+char *action_verb(enum ActionType type) {
+  /* Returns the string associated with <type> */
+  struct ActionDef *def = action_def(type);
+  if( def == NULL ) {
+    fprintf(stderr, "action_verb: failure to find verb for ActionType %d\n", type);
+    exit(EXIT_FAILURE);
+  }
+  return def->verb;
+}
+
 struct Action handle_options(int argc, char **argv) {
   /* returns the proper action to take */
   struct Action action = {NOTHING, 1, NULL};
@@ -385,13 +431,15 @@ struct Action handle_options(int argc, char **argv) {
     case COPY:
     case MOVE:
       if( (optind +1) < argc ) {
-	fprintf(stderr, "Too many supplied arguments for requested action\n");
+	fprintf(stderr, "Too many supplied arguments for requested action: `%s'\n",
+		action_verb(action.type));
 	usage(EXIT_FAILURE);
       }
       action.ptr = argv[optind];
       break;
     default:
-      fprintf(stderr, "Requested action does not take arguments");
+      fprintf(stderr, "Requested action `%s' does not take arguments\n",
+	      action_verb(action.type));
       usage(EXIT_FAILURE);
     }
   }
@@ -503,46 +551,26 @@ void print(int s) {
   }
 }
 
-char **cmd_gen(struct Action action, char *source, char *dest, char **verb) {
+char **cmd_gen(struct Action action, char *source, char *dest) {
   /* generates the command to run to perform "action" between "source" and "dest",
-     returns the command in the form of null-terminiated argv, and sets "verb" to the proper verb */
+     returns the command in the form of null-terminiated argv */
   char *prefix = "cmd_gen:";
   char **argv;
+  struct ActionDef *def;
+  int i;
 
-  switch (action.type) {
-  case COPY:
-    {
-      char *array_init[] = {
-	"/bin/cp",
-	"-r",
-	"--",
-	source,
-	dest,
-	NULL
-      };
-      *verb = "copy";
-      argv = xmalloc(sizeof(array_init));
-      memcpy(argv, array_init, sizeof(array_init));
-      break;
-    }
-  case MOVE:
-    {
-      char *array_init[] = {
-	"/bin/mv",
-	"--",
-	source,
-	dest,
-	NULL
-      };
-      *verb = "move";
-      argv = xmalloc(sizeof(array_init));
-      memcpy(argv, array_init, sizeof(array_init));
-      break;
-    }
-  default:
+  def = action_def(action.type);
+  if( def == NULL ) {
     fprintf(stderr, "%s error: unsupported action\n", prefix);
     exit(EXIT_FAILURE);
   }
+
+  argv = xmalloc(sizeof(char*) * EXEC_ARG_MAX);
+  for( i = 0; i < EXEC_ARG_MAX; i++ ) {
+    argv[i] = def->argv[i];
+  }
+  argv[def->source_slot] = source;
+  argv[def->dest_slot] = dest;
   return argv;
 }
 
@@ -653,7 +681,8 @@ void action_pop(int s, struct Action action, bool interactive) {
     printf("dst: %s\n", dest);
   }
 
-  execargv = cmd_gen(action, source, dest, &verb); /* copies references, not data */
+  verb = action_verb(action.type);
+  execargv = cmd_gen(action, source, dest); /* copies references, not data */
 
   if( interactive ) {
     if( action.num > 1 ) {
