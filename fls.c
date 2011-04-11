@@ -5,7 +5,6 @@
 #include <signal.h>
 #include <unistd.h>
 #include <stdbool.h>
-#include <pwd.h>
 #include <libgen.h>
 #include <sys/un.h>
 #include <sys/stat.h>
@@ -42,48 +41,40 @@ struct Action {
 struct ActionDef {
   enum ActionType type;
   char *verb;
-  char *argv[EXEC_ARG_MAX];
+  char *exargv[EXEC_ARG_MAX];
   int source_slot, dest_slot;
 };
 
 struct ActionDef actions[] = {
-  {PUSH, "push", {NULL}, 0, 0},
-  {DROP, "drop", {NULL}, 0, 0},
-  {PRINT, "print", {NULL}, 0, 0},
-  {COPY,
-   "copy",
-   {"/bin/cp", "-r", "--", NULL, NULL, NULL},
-   3, 4},
-  {MOVE,
-   "move",
-   {"/bin/mv", "--", NULL, NULL, NULL},
-   2, 3},
+  {PUSH,        "push",  {NULL}, 0, 0},
+  {DROP,        "drop",  {NULL}, 0, 0},
+  {PRINT,       "print", {NULL}, 0, 0},
+  {COPY,        "copy",  {"/bin/cp", "-r", "--", NULL, NULL, NULL}, 3, 4},
+  {MOVE,        "move",  {"/bin/mv", "--", NULL, NULL, NULL},       2, 3},
   {INTERACTIVE, "interactive mode", {NULL}, 0, 0},
-  {STOP, "terminate daemon", {NULL}, 0, 0},
+  {STOP,        "terminate daemon", {NULL}, 0, 0},
   {NOTHING}
 };
-char *soc_path;
+const char *program_name;
+const char *soc_path;
 int verbose=0;
 bool am_daemon=false;
-/* perhaps a global prefix for "deamon: " or "" ?*/
 
 /*
- * general functions
+ * General functions
  */
 
 void usage(int status) {
+  /* Tell the user how to do better, and exit with <status>. */
   if( status != EXIT_SUCCESS ) {
-    fprintf(stderr, "Try `%s -h' for more information.\n", PROGRAM_NAME);
+    fprintf(stderr, "Try `%s -h' for more information.\n", program_name);
   } else {
     printf("\
 Usage: %s <ACTION> [OPTION...] [DEST]\n\
   or:  %s [FILE]...\n\
-", PROGRAM_NAME, PROGRAM_NAME);
+", program_name, program_name);
     printf("\
 Push FILEs onto the stack, or perform action ACTION.\n\
-\n\
-The files in the stack are not altered until being popped, \n\
-and even then, only if they are to be moved.\n\
 ");
     printf("\
 \n\
@@ -120,7 +111,7 @@ If FILEs are provided, push them onto the stack.\n\
 }
 
 void *xmalloc(size_t size) {
-  /* loudly fail on memory allocation fail */
+  /* Loudly fail on memory allocation error. */
   void *ptr;
 
   ptr = malloc(size);
@@ -132,8 +123,9 @@ void *xmalloc(size_t size) {
 }
 
 char *xstrdup(char *str) {
-  /* loudly fail on memory allocation fail */
+  /* Loudly fail on memory allocation error. */
   char *ptr;
+
   ptr = strdup(str);
   if( ptr == NULL ) {
     fprintf(stderr, "strdup failed\n");
@@ -143,7 +135,7 @@ char *xstrdup(char *str) {
 }
 
 void log_output() {
-  /* redirect stdout and stderr to <soc_path>.log */
+  /* Redirect stdout and stderr to `<soc_path>.log'. */
   char *prefix, logfile[FILEPATH_MAX];
   sprintf(logfile, "%s.log", soc_path);
 
@@ -161,6 +153,7 @@ void log_output() {
 }
 
 bool isdir(char *path) {
+  /* Return whether <path> is a directory. */
   struct stat st;
   if( stat(path, &st) == -1 ) {
     perror("stat");
@@ -172,26 +165,32 @@ bool isdir(char *path) {
 }
 
 /*
- * socket functions
+ * Socket functions
  */
 
-void set_soc_path() {
-  /* generate soc_path from user name */
-  char *username, *tmpdir="/tmp/";
+void set_program_name(const char *argv0) {
+  /* Set program_name to argv0. */
+
+  program_name = argv0;
+}
+
+void genset_soc_path() {
+  /* Generate soc_path from user name, and set it. */
+  char *generated, *username, *tmpdir="/tmp/";
   int size;
 
   username = getenv("USER");
 
   size = strlen(tmpdir) + strlen(username) + strlen(PROGRAM_NAME) +1;
-  soc_path = xmalloc(size);
-  sprintf(soc_path, "%s%s%s", tmpdir, username, PROGRAM_NAME);
+  generated = xmalloc(size);
+  sprintf(generated, "%s%s%s", tmpdir, username, PROGRAM_NAME);
+  soc_path = generated;
 }
 
 int soc_r(int s, char *buf, int blen) {
-  /* recursive read, reads whole strings
-     because, sometimes, two quick writes are sent as one packet (?)
-     returns number of bytes read (with null) on success
-     returns 0 on broken socket, and -1 on general failure */
+  /* Read a string to <buf> from <s>.
+     Return the number of bytes read (including null) on success,
+     0 on broken socket, or -1 on general failure. */
   char *last_read, *prefix;
   bool garbage=false;
   int n;
@@ -221,8 +220,6 @@ int soc_r(int s, char *buf, int blen) {
 	} else
 	  perror(prefix);
       }
-      /* n==0 means connection dropped; should I let somebody know? */
-      /* SPECULAH: throw USR2 or PIPE in case of error? (client would kill self, daemon would disconnect/ignore) */
       return n;
     }
 
@@ -256,13 +253,13 @@ int soc_r(int s, char *buf, int blen) {
 
   if( verbose )
     printf("%s `%s'\n", prefix, buf);
-  /* +1 to start index at 1 */
-  return last_read - buf +1;
+  /* +1 to count last_read */
+  return last_read +1 - buf;
 }
 
 void soc_w(int s, char *buf) {
-  /* quick and dirty write string to socket -
-     expect most error handling to happen on the other side */
+  /* Quick and dirty write string to socket -
+     expect most error handling to happen on the other side. */
   char *prefix;
   int len, n;
 
@@ -285,7 +282,8 @@ void soc_w(int s, char *buf) {
 }
 
 bool readwait(int s, float timeout) {
-  /* waits up to <timeout> secs for socket <s> to not block; returns whether it did */
+  /* Return whether socket <s> is ready for reading, after waiting
+     up to <timeout> seconds for that to become true. */
   struct timeval tv;
   fd_set readfds;
 
@@ -301,22 +299,21 @@ bool readwait(int s, float timeout) {
 }
 
 bool read_status_okay(int s) {
-  /* reads status message from socket <s>;
-     returns true if successfully read MSG_SUCCESS,
-     false otherwise */
+  /* Read status message from socket <s>.
+     Return true if successfully read MSG_SUCCESS,
+     false otherwise. */
   char buf[MSG_MAX];
   if( soc_r(s, buf, MSG_MAX) > 0 && strcmp(buf, MSG_SUCCESS) == 0 )
     return true;
   return false;
 }
 
-
 /*
- * signal functions
+ * Signal functions
  */
 
 void sig_block(int signum) {
-  /* block signal <signum> */
+  /* Block signal <signum>. */
   sigset_t block_mask;
 
   sigemptyset(&block_mask);
@@ -325,8 +322,8 @@ void sig_block(int signum) {
 }
 
 bool sig_catch(float timeout) {
-  /* wait up to <timeout> seconds to receive a signal (including blocked/pending)
-     return whether we did */
+  /* Wait up to <timeout> seconds to receive a signal (including blocked/pending).
+     Return whether we did. */
   struct timespec ts;
   sigset_t all_sigs;
 
@@ -339,7 +336,7 @@ bool sig_catch(float timeout) {
 }
 
 void sig_ignore(int signum) {
-  /* ignore any received <signum> */
+  /* Ignore any received <signum>. */
   struct sigaction sa_ign;
 
   sa_ign.sa_handler = SIG_IGN;
@@ -353,13 +350,14 @@ void sig_ignore(int signum) {
 }
 
 /*
- * client functions
+ * Client functions
  */
 
 struct ActionDef *action_def(enum ActionType type) {
-  /* Finds the ActionDef matching <type>.
-     Returns a pointer to that ActionDef, or NULL on failure to match. */
+  /* Return a pointer to the ActionDef matching <type>, or NULL if there
+     was no match. */
   struct ActionDef *def=actions;
+
   while( def->verb != NULL && def->type != type ) {
     def++;
   }
@@ -369,8 +367,9 @@ struct ActionDef *action_def(enum ActionType type) {
 }
 
 char *action_verb(enum ActionType type) {
-  /* Returns the string associated with <type> */
-  struct ActionDef *def = action_def(type);
+  /* Return the string associated with <type>. */
+  struct ActionDef *def=action_def(type);
+
   if( def == NULL ) {
     fprintf(stderr, "action_verb: failure to find verb for ActionType %d\n", type);
     exit(EXIT_FAILURE);
@@ -378,12 +377,12 @@ char *action_verb(enum ActionType type) {
   return def->verb;
 }
 
-struct Action handle_options(int argc, char **argv) {
-  /* returns the proper action to take */
+struct Action handle_options(int argc, char **exargv) {
+  /* Return the proper action to take. */
   struct Action action = {NOTHING, 1, NULL};
   int c;
 
-  while( (c = getopt(argc, argv, "cmdpiqvn:h")) != -1 ) {
+  while( (c = getopt(argc, exargv, "cmdpiqvn:h")) != -1 ) {
     switch (c) {
     case 'c':
       action.type = COPY;
@@ -409,7 +408,7 @@ struct Action handle_options(int argc, char **argv) {
     case 'n':
       action.num = atoi(optarg);
       if( action.num <= 0 ) {
-	fprintf(stderr, "invalid argument `%s' for option `%s'\n", optarg, argv[optind]);
+	fprintf(stderr, "invalid argument `%s' for option `%s'\n", optarg, exargv[optind]);
 	usage(EXIT_FAILURE);
       }
       break;
@@ -426,7 +425,7 @@ struct Action handle_options(int argc, char **argv) {
     case NOTHING:
       action.type = PUSH;
       action.num = argc - optind;
-      action.ptr = &argv[optind];
+      action.ptr = &exargv[optind];
       break;
     case COPY:
     case MOVE:
@@ -435,7 +434,7 @@ struct Action handle_options(int argc, char **argv) {
 		action_verb(action.type));
 	usage(EXIT_FAILURE);
       }
-      action.ptr = argv[optind];
+      action.ptr = exargv[optind];
       break;
     default:
       fprintf(stderr, "Requested action `%s' does not take arguments\n",
@@ -447,7 +446,7 @@ struct Action handle_options(int argc, char **argv) {
 }
 
 int client_connect() {
-  /* connects to daemon, returns connected socket */
+  /* Return a socket that is connected to the daemon. */
   struct sockaddr_un sockaddr;
   int s, len;
 
@@ -472,7 +471,8 @@ int client_connect() {
 }
 
 void push(int s, char *file) {
-  /* instructs daemon to push file onto stack, terminates on error */
+  /* Instruct daemon to push <file> onto the stack.
+     Terminate on error. */
   char buf[FILEPATH_MAX], *fullpath, *prefix="push:";
   int okay;
 
@@ -484,10 +484,10 @@ void push(int s, char *file) {
       exit(EXIT_FAILURE);
     }
     printf("Could not push; received error: `%s'\n", buf);
-    return;
+    exit(EXIT_FAILURE);
   }
 
-  fullpath = realpath(file, NULL); /* malloc()s fullpath */
+  fullpath = realpath(file, NULL);
   if( fullpath == NULL ) {
     perror("realpath");
     exit(EXIT_FAILURE);
@@ -512,7 +512,8 @@ void push(int s, char *file) {
 }
 
 bool drop(int s) {
-  /* instructs daemon to pop a file from the stack, returns true if it could */
+  /* Instruct daemon to pop a file from the stack.
+     Return whether it could. */
   char buf[FILEPATH_MAX], *prefix="drop:";
   int okay;
 
@@ -532,8 +533,7 @@ bool drop(int s) {
 }
 
 void print(int s) {
-  /* instructs daemon to send back the contents of the stack,
-     and prints it for the user */
+  /* Print the contents of the stack for the user. */
   char buf[FILEPATH_MAX];
   int i, stack_size;
 
@@ -552,10 +552,9 @@ void print(int s) {
 }
 
 char **cmd_gen(struct Action action, char *source, char *dest) {
-  /* generates the command to run to perform "action" between "source" and "dest",
-     returns the command in the form of null-terminiated argv */
-  char *prefix = "cmd_gen:";
-  char **argv;
+  /* Return the shell command (in the form of a null-terminated argv)
+     that would perform <action> between <source> and <dest>. */
+  char **exargv, *prefix="cmd_gen:";
   struct ActionDef *def;
   int i;
 
@@ -565,25 +564,25 @@ char **cmd_gen(struct Action action, char *source, char *dest) {
     exit(EXIT_FAILURE);
   }
 
-  argv = xmalloc(sizeof(char*) * EXEC_ARG_MAX);
+  exargv = xmalloc(sizeof(char*) * EXEC_ARG_MAX);
   for( i = 0; i < EXEC_ARG_MAX; i++ ) {
-    argv[i] = def->argv[i];
+    exargv[i] = def->exargv[i];
   }
-  argv[def->source_slot] = source;
-  argv[def->dest_slot] = dest;
-  return argv;
+  exargv[def->source_slot] = source;
+  exargv[def->dest_slot] = dest;
+  return exargv;
 }
 
-int action_exec(char **argv) {
-  /* Fork an exec, and return the exit status, or -1 on other error */
+int action_exec(char **exargv) {
+  /* Fork an exec of the null-terminated argv <exargv>.
+     Return the exit status, or -1 on other error. */
   char *prefix="action_exec:";
   int exit_status;
   pid_t pid;
 
   pid = fork();
-
   if( pid == 0 ) {
-    if( execv(argv[0], argv) == -1 ) {
+    if( execv(exargv[0], exargv) == -1 ) {
       perror("execv");
       return -1;
     }
@@ -600,7 +599,7 @@ int action_exec(char **argv) {
     if( WIFEXITED(exit_status) ) {
       int status = WEXITSTATUS(exit_status);
       if( status != EXIT_SUCCESS ) {
-	fprintf(stderr,"%s %s exited with status=%d\n", prefix, argv[0], status);
+	fprintf(stderr,"%s %s exited with status=%d\n", prefix, exargv[0], status);
       }
       return status;
     } else if( WIFSIGNALED(exit_status) ) {
@@ -614,9 +613,9 @@ int action_exec(char **argv) {
 }
 
 char *real_target(char *reltarget) {
-  /* Takes a target file/dir (NULL for cwd),
-     returns malloc()ed canonicalized path.
-     Terminates on failure. */
+  /* Return the canonicalized absolute path to <reltarget>
+     (or current working dir, if <reltarget> is NULL).
+     Terminate if any component of the path but the last doesn't exist. */
   char *target;
 
   target = realpath((reltarget == NULL ? "." : reltarget), NULL);
@@ -648,11 +647,11 @@ char *real_target(char *reltarget) {
 }
 
 bool cmd_report(struct Action action, char *source, char *dest, bool interactive) {
-  /* Reports to the user what the command is about to do,
-     and, if <interactive>, asks the user whether to continue.
-     Returns true if everything's normal,
+  /* Report to the user what the command is about to do,
+     and, if <interactive>, ask the user whether to continue.
+     Return true if everything's normal,
      false if user wants to drop without performing the action,
-     or terminates if user didn't want to continue. */
+     or terminate if user didn't want to continue. */
   char buf[MSG_MAX], *verb=action_verb(action.type);
   bool cancel=false, do_action=true;
 
@@ -719,10 +718,9 @@ bool cmd_report(struct Action action, char *source, char *dest, bool interactive
 }
 
 void action_pop(int s, struct Action action, bool interactive) {
-  /* instructs daemon to pop a file from the stack,
-     and "action"s that file to the current working dir */
+  /* <action> the top file from the stack, and pop it. */
   char *prefix="action_pop:", *stack_state="stack not altered";
-  char buf[FILEPATH_MAX], *source, *dest, **execargv;
+  char buf[FILEPATH_MAX], *source, *dest, **exargv;
   bool remote_error=false;
 
   soc_w(s, "peek");
@@ -743,7 +741,7 @@ void action_pop(int s, struct Action action, bool interactive) {
 
   dest = real_target(action.ptr);
   if( action.num > 1 && !isdir(dest) ) {
-    fprintf(stderr, "%s: multi-file target `%s' is not a directory\n", PROGRAM_NAME, dest);
+    fprintf(stderr, "%s: multi-file target `%s' is not a directory\n", program_name, dest);
     exit(EXIT_FAILURE);
   }
   if( verbose ) {
@@ -751,15 +749,15 @@ void action_pop(int s, struct Action action, bool interactive) {
     printf("dst: %s\n", dest);
   }
 
-  execargv = cmd_gen(action, source, dest); /* copies references, not data */
+  exargv = cmd_gen(action, source, dest); /* copies references, not data */
 
   if( cmd_report(action, source, dest, interactive)
-      && action_exec(execargv) != 0 ) {
+      && action_exec(exargv) != 0 ) {
     fprintf(stderr, "%s copy unsuccessful, aborting... (%s)\n", prefix, stack_state);
     exit(EXIT_FAILURE);
   }
   free(dest);
-  free(execargv);
+  free(exargv);
   soc_w(s, "pop");
   stack_state = "stack state debatable";
   if( !read_status_okay(s) ) {
@@ -772,14 +770,12 @@ void action_pop(int s, struct Action action, bool interactive) {
 }
 
 void interactive(int s) {
-  /* opens up an interactive terminal session with the daemon
-     useful for debugging, not much else */
+  /* Open an interactive terminal session with the daemon.
+     Useful for debugging, not much else. */
   char buf[FILEPATH_MAX+1], *nl;
   int c, read;
-  bool more;
 
   while( printf("> "), fgets(buf, FILEPATH_MAX+1, stdin) != NULL ) {
-    /* drop the newline */
     nl = strchr(buf, '\n');
     if( nl == NULL ) {
       printf("Didn't send, input too long\n");
@@ -803,13 +799,12 @@ void interactive(int s) {
 	exit(EXIT_FAILURE);
       }
       /* check if there's more */
-      more = readwait(s, 0.2);
-    } while( more );
+    } while( readwait(s, 0.2) );
   }
 }
 
-void do_action(struct Action action, int s) {
-  /* invokes the proper handler for action, passing args as necessary */
+void action_do(struct Action action, int s) {
+  /* Invoke the proper handler for <action>. */
   int i;
 
   switch(action.type) {
@@ -824,8 +819,10 @@ void do_action(struct Action action, int s) {
     if( verbose )
       printf("drop\n");
     for( i = 0; i < action.num; i++ ) {
-      if( !drop(s) )
-	printf("popped %d\n", i);
+      if( !drop(s) ) {
+	printf("popped %d file%s\n", i, i == 1 ? "" : "s");
+	exit(EXIT_FAILURE);
+      }
     }
     break;
   case NOTHING:
@@ -853,30 +850,26 @@ void do_action(struct Action action, int s) {
 }
 
 /*
- * daemon functions
+ * Daemon functions
  */
 
 bool daemon_serve(int s, char *cmd) {
-  /* do cmd for client connected on s */
+  /* Do <cmd> for client connected on <s>. */
   static char *stack[STACK_MAX];
   static int stackind=0;
   char buf[FILEPATH_MAX];
   bool keep_running=true;
 
-  /* SPECULAH:
-     replace with enums and switch?
-     use macros for these things, instead of having the same strings here and there?
-     send status before every message? */
   if( strcmp(cmd, "push") == 0 ) {
     char *status;
     if( stackind >= STACK_MAX ) {
-      printf("deamon: push request failed (stack full)\n");
+      printf("daemon: push request failed (stack full)\n");
       status = MSG_ERROR;
       strcpy(buf, MSG_ERR_STACK_FULL);
     } else {
       soc_w(s, MSG_SUCCESS);
       if( soc_r(s, buf, FILEPATH_MAX) <= 0 ) {
-	printf("deamon: push request failed (read error)\n");
+	printf("daemon: push request failed (read error)\n");
 	status = MSG_ERROR;
 	strcpy(buf, MSG_ERR_LENGTH);
       } else {
@@ -892,14 +885,14 @@ bool daemon_serve(int s, char *cmd) {
   } else if( strcmp(cmd, "pop") == 0 ) {
     char *status;
     if( stackind > 0 ) {
+      status = MSG_SUCCESS;
       sprintf(buf, "%s", stack[--stackind]);
       free(stack[stackind]);
       printf("daemon: POP `%s'\n", buf);
-      status = MSG_SUCCESS;
     } else {
       printf("daemon: tried to pop from empty stack\n");
-      sprintf(buf, MSG_ERR_STACK_EMPTY);
       status = MSG_ERROR;
+      sprintf(buf, MSG_ERR_STACK_EMPTY);
     }
     soc_w(s, status);
     soc_w(s, buf);
@@ -907,17 +900,16 @@ bool daemon_serve(int s, char *cmd) {
   } else if( strcmp(cmd, "peek") == 0 ) {
     char *status;
     if( stackind > 0 ) {
-      sprintf(buf, "%s", stack[stackind -1]);
       status = MSG_SUCCESS;
+      sprintf(buf, "%s", stack[stackind -1]);
     } else {
-      sprintf(buf, MSG_ERR_STACK_EMPTY);
       status = MSG_ERROR;
+      sprintf(buf, MSG_ERR_STACK_EMPTY);
     }
     soc_w(s, status);
     soc_w(s, buf);
 
   } else if( strcmp(cmd, "print") == 0 ) {
-    char buf[FILEPATH_MAX];
     int i;
     sprintf(buf, "%d", stackind);
     soc_w(s, buf);
@@ -941,7 +933,7 @@ bool daemon_serve(int s, char *cmd) {
 }
 
 void daemon_run(int soc_listen) {
-  /* main daemon loop */
+  /* Main daemon loop. */
   int soc_connect;
   bool done, connected;
   char cmd[MSG_MAX];
@@ -967,7 +959,7 @@ void daemon_run(int soc_listen) {
       exit(EXIT_FAILURE);
     }
     connected = true;
-    printf("deamon: Connected.\n");
+    printf("daemon: Connected.\n");
     while( connected && !done ) {
       int n;
       n = soc_r(soc_connect, cmd, MSG_MAX);
@@ -996,9 +988,12 @@ void daemon_run(int soc_listen) {
 int main(int argc, char **argv) {
   int soc_listen;
   struct sockaddr_un local;
-  struct Action action = handle_options(argc, argv);
+  struct Action action;
 
-  set_soc_path();
+  set_program_name(argv[0]);
+  genset_soc_path();
+
+  action = handle_options(argc, argv);
   sig_block(SIGUSR1);
 
   if( (soc_listen = socket(AF_UNIX, SOCK_STREAM, 0)) == -1 ) {
@@ -1023,7 +1018,6 @@ int main(int argc, char **argv) {
     /* start the daemon */
     printf("Starting daemon...\n");
 
-    /* TODO: make sure daemon survives a SIGINT to its parent */
     if( !fork() ) {
       /* don't fill the log with junk just because client was started with -v */
       verbose = 0;
@@ -1039,7 +1033,7 @@ int main(int argc, char **argv) {
       if( verbose )
 	printf("Waiting for signal...\n");
       /* wait a whole second for the daemon to start running */
-      /* expect to be receive SIGUSR1 */
+      /* expect to receive SIGUSR1 */
       if( !sig_catch(1.0) ) {
 	fprintf(stderr, "Daemon failed to start\n");
 	fprintf(stderr, "Continue anyway\n");
@@ -1052,7 +1046,7 @@ int main(int argc, char **argv) {
 
   int s = client_connect();
 
-  do_action(action, s);
+  action_do(action, s);
   close(s);
   if( verbose )
     printf("Client exit\n");
