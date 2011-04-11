@@ -647,13 +647,83 @@ char *real_target(char *reltarget) {
   return target;
 }
 
+bool cmd_report(struct Action action, char *source, char *dest, bool interactive) {
+  /* Reports to the user what the command is about to do,
+     and, if <interactive>, asks the user whether to continue.
+     Returns true if everything's normal,
+     false if user wants to drop without performing the action,
+     or terminates if user didn't want to continue. */
+  char buf[MSG_MAX], *verb=action_verb(action.type);
+  bool cancel=false, do_action=true;
+
+  if( interactive ) {
+    if( action.num > 1 ) {
+      int read_again=true;
+      while( read_again == true ) {
+	printf("%s %d files to `%s' [Yn]?", verb, action.num, dest);
+	if( fgets(buf, MSG_MAX, stdin) == NULL ) {
+	  printf("error reading from stdin\n");
+	  exit(EXIT_FAILURE);
+	}
+	switch (buf[0]) {
+	case '\n':
+	case 'Y': case 'y':
+	  read_again = false;
+	  break;
+	case 'N': case 'n':
+	  read_again = false;
+	  cancel = true;
+	  break;
+	default:
+	  printf("What?\n");
+	  break;
+	}
+	printf("%s `%s' to `%s'\n", verb, source, dest);
+      }
+    } else {
+      int read_again=true;
+      while( read_again == true ) {
+	printf("%s `%s' to `%s' [Ynd]?", verb, source, dest);
+	if( fgets(buf, MSG_MAX, stdin) == NULL ) {
+	  printf("error reading from stdin\n");
+	  exit(EXIT_FAILURE);
+	}
+	switch (buf[0]) {
+	case '\n':
+	case 'Y': case 'y':
+	  read_again = false;
+	  break;
+	case 'N': case 'n':
+	  cancel = true;
+	  read_again = false;
+	  break;
+	case 'D': case 'd':
+	  do_action = false;
+	  printf("drop `%s'\n", source);
+	  read_again = false;
+	  break;
+	default:
+	  printf("What?\n");
+	  break;
+	}
+      }
+    }
+  } else { 			/* !interactive */
+    printf("%s `%s' to `%s'\n", verb, source, dest);
+  }
+  if( cancel ) {
+    printf("%s canceled by user\n", verb);
+    exit(EXIT_FAILURE);
+  }
+  return do_action;
+}
+
 void action_pop(int s, struct Action action, bool interactive) {
   /* instructs daemon to pop a file from the stack,
      and "action"s that file to the current working dir */
   char *prefix="action_pop:", *stack_state="stack not altered";
-  char buf[FILEPATH_MAX], *source, *dest, **execargv, *verb;
-  bool remote_error=false, cancel=false;
-  int c;
+  char buf[FILEPATH_MAX], *source, *dest, **execargv;
+  bool remote_error=false;
 
   soc_w(s, "peek");
   if( !read_status_okay(s) )
@@ -681,34 +751,10 @@ void action_pop(int s, struct Action action, bool interactive) {
     printf("dst: %s\n", dest);
   }
 
-  verb = action_verb(action.type);
   execargv = cmd_gen(action, source, dest); /* copies references, not data */
 
-  if( interactive ) {
-    if( action.num > 1 ) {
-      printf("%s %d files to `%s' [Yn]?", verb, action.num, dest);
-      c = getchar();
-      if( c == 'n' ) {
-	cancel = true;
-      } else
-	printf("%s `%s' to `%s'\n", verb, source, dest);
-    } else {
-      /* TODO: add 'd' option for "drop from stack but don't do anything with the value" */
-      printf("%s `%s' to `%s' [Yn]?", verb, source, dest);
-      c = getchar();
-      if( c == 'n' ) {
-	cancel = true;
-      }
-    }
-  } else { 			/* !interactive */
-    printf("%s `%s' to `%s'\n", verb, source, dest);
-  }
-  if( cancel ) {
-    printf("%s canceled by user (%s)\n", verb, stack_state);
-    exit(EXIT_FAILURE);
-  }
-
-  if( action_exec(execargv) != 0 ) {
+  if( cmd_report(action, source, dest, interactive)
+      && action_exec(execargv) != 0 ) {
     fprintf(stderr, "%s copy unsuccessful, aborting... (%s)\n", prefix, stack_state);
     exit(EXIT_FAILURE);
   }
