@@ -23,6 +23,11 @@
 #define MSG_ERR_LENGTH "file path too long"
 #define EXEC_ARG_MAX 6
 
+typedef struct StackNode {
+  char *dat;
+  struct StackNode *next;
+} Node;
+
 struct Action {
   enum ActionType {
     NOTHING,
@@ -850,19 +855,78 @@ void action_do(struct Action action, int s) {
 }
 
 /*
+ * Stack functions
+ */
+
+Node **new_stack() {
+  /* Return a blank stack. */
+  Node **stack=malloc(sizeof(*stack));
+
+  *stack = NULL;
+  return stack;
+}
+
+void stack_push(char *dat, Node **stack) {
+  /* Push <dat> onto the stack. */
+  Node *new=xmalloc(sizeof(*new));
+
+  new->dat = xstrdup(dat);
+  new->next = *stack;
+  *stack = new;
+}
+
+bool stack_drop(Node **stack) {
+  /* Drop the top item from the stack. */
+  Node *dropnode=*stack;
+
+  if( dropnode == NULL )
+    return false;
+  *stack = (*stack)->next;
+  free(dropnode->dat);
+  free(dropnode);
+  return true;
+}
+
+char *stack_peek(Node **stack) {
+  /* Return the top item of the stack. */
+
+  return (*stack)->dat;
+}
+
+char *stack_nth(int n, Node **stack) {
+  /* Return the <n>th item of the stack. */
+
+  if( n > 0 )
+    return stack_nth( n-1, &((*stack)->next) );
+  else
+    return stack_peek(stack);
+}
+
+int stack_len(Node **stack) {
+  /* Return the number of items in the stack. */
+  Node *elt=*stack;
+  int i=0;
+
+  while( elt != NULL ) {
+    elt = elt->next;
+    i++;
+  }
+  return i;
+}
+
+/*
  * Daemon functions
  */
 
 bool daemon_serve(int s, char *cmd) {
   /* Do <cmd> for client connected on <s>. */
-  static char *stack[STACK_MAX];
-  static int stackind=0;
+  static Node *null=NULL, **stack=&null;
   char buf[FILEPATH_MAX];
   bool keep_running=true;
 
   if( strcmp(cmd, "push") == 0 ) {
     char *status;
-    if( stackind >= STACK_MAX ) {
+    if( stack_len(stack) >= STACK_MAX ) {
       printf("daemon: push request failed (stack full)\n");
       status = MSG_ERROR;
       strcpy(buf, MSG_ERR_STACK_FULL);
@@ -874,8 +938,7 @@ bool daemon_serve(int s, char *cmd) {
 	strcpy(buf, MSG_ERR_LENGTH);
       } else {
 	status = MSG_SUCCESS;
-	stack[stackind] = xmalloc(strlen(buf) +1);
-	strcpy(stack[stackind++], buf);
+	stack_push(buf, stack);
 	printf("daemon: PUSH `%s'\n", buf);
       }
     }
@@ -884,10 +947,10 @@ bool daemon_serve(int s, char *cmd) {
 
   } else if( strcmp(cmd, "pop") == 0 ) {
     char *status;
-    if( stackind > 0 ) {
+    if( stack_len(stack) > 0 ) {
       status = MSG_SUCCESS;
-      sprintf(buf, "%s", stack[--stackind]);
-      free(stack[stackind]);
+      sprintf(buf, "%s", stack_peek(stack));
+      stack_drop(stack);
       printf("daemon: POP `%s'\n", buf);
     } else {
       printf("daemon: tried to pop from empty stack\n");
@@ -899,9 +962,9 @@ bool daemon_serve(int s, char *cmd) {
 
   } else if( strcmp(cmd, "peek") == 0 ) {
     char *status;
-    if( stackind > 0 ) {
+    if( stack_len(stack) > 0 ) {
       status = MSG_SUCCESS;
-      sprintf(buf, "%s", stack[stackind -1]);
+      sprintf(buf, "%s", stack_peek(stack));
     } else {
       status = MSG_ERROR;
       sprintf(buf, MSG_ERR_STACK_EMPTY);
@@ -911,10 +974,10 @@ bool daemon_serve(int s, char *cmd) {
 
   } else if( strcmp(cmd, "print") == 0 ) {
     int i;
-    sprintf(buf, "%d", stackind);
+    sprintf(buf, "%d", stack_len(stack));
     soc_w(s, buf);
-    for( i = stackind -1; i >= 0; i-- ) {
-      soc_w(s, stack[i]);
+    for( i = 0; i < stack_len(stack); i++ ) {
+      soc_w(s, stack_nth(i, stack));
     }
 
   } else if( strcmp(cmd, "stop") == 0 ) {
