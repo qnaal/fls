@@ -542,16 +542,20 @@ void print(int s) {
   char buf[FILEPATH_MAX];
   int i, stack_size;
 
-  soc_w(s, "print");
-  if( soc_r(s, buf, FILEPATH_MAX) <= 0 ) {
-    exit(EXIT_FAILURE);
-  }
+  soc_w(s, "size");
+  soc_r(s, buf, MSG_MAX);
   stack_size = atoi(buf);
   printf("%d file%s in stack\n", stack_size, (stack_size == 1) ? "" : "s");
   for( i = 0; i < stack_size; i++ ) {
-    if( soc_r(s, buf, FILEPATH_MAX) <= 0 ) {
+    soc_w(s, "pick");
+    sprintf(buf, "%d", i);
+    soc_w(s, buf);
+    if( !read_status_okay(s) ) {
+      soc_r(s, buf, FILEPATH_MAX);
+      printf("error: `%s'\n", buf);
       exit(EXIT_FAILURE);
     }
+    soc_r(s, buf, FILEPATH_MAX);
     printf("%d: %s\n", i, buf);
   }
 }
@@ -972,13 +976,21 @@ bool daemon_serve(int s, char *cmd) {
     soc_w(s, status);
     soc_w(s, buf);
 
-  } else if( strcmp(cmd, "print") == 0 ) {
-    int i;
+  } else if( strcmp(cmd, "pick") == 0 ) {
+    char *picked;
+    soc_r(s, buf, MSG_MAX);
+    picked = stack_nth(atoi(buf), stack);
+    if( picked == NULL ) {
+      soc_w(s, MSG_ERROR);
+      soc_w(s, "stack is not quite that deep");
+    } else {
+      soc_w(s, MSG_SUCCESS);
+      soc_w(s, picked);
+    }
+
+  } else if( strcmp(cmd, "size") == 0 ) {
     sprintf(buf, "%d", stack_len(stack));
     soc_w(s, buf);
-    for( i = 0; i < stack_len(stack); i++ ) {
-      soc_w(s, stack_nth(i, stack));
-    }
 
   } else if( strcmp(cmd, "stop") == 0 ) {
     printf("daemon: Shutting down...\n");
