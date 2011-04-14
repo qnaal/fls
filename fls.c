@@ -21,6 +21,12 @@
 #define MSG_ERR_STACK_EMPTY "file stack empty"
 #define MSG_ERR_STACK_FULL "file stack full"
 #define MSG_ERR_LENGTH "file path too long"
+#define CMD_PUSH "push"
+#define CMD_POP  "pop"
+#define CMD_PEEK "peek"
+#define CMD_PICK "pick"
+#define CMD_SIZE "size"
+#define CMD_STOP "stop"
 #define EXEC_ARG_MAX 6
 #define PLURALS(int) (int == 1 ? "" : "s")
 
@@ -482,7 +488,7 @@ void push(int s, char *file) {
   char buf[FILEPATH_MAX], *fullpath, *prefix="push:";
   int okay;
 
-  soc_w(s, "push");
+  soc_w(s, CMD_PUSH);
   okay = read_status_okay(s);
   if( !okay ) {
     if( soc_r(s, buf, FILEPATH_MAX) <= 0 ) {
@@ -523,7 +529,7 @@ bool drop(int s) {
   char buf[FILEPATH_MAX], *prefix="drop:";
   int okay;
 
-  soc_w(s, "pop");
+  soc_w(s, CMD_POP);
   okay = read_status_okay(s);
   if( soc_r(s, buf, FILEPATH_MAX) <= 0 ) {
     fprintf(stderr, "%s quitting for read error\n", prefix);
@@ -543,7 +549,7 @@ void multidrop(int s, int num) {
   char buf[MSG_MAX];
   int i, instack;
 
-  soc_w(s, "size");
+  soc_w(s, CMD_SIZE);
   soc_r(s, buf, MSG_MAX);
   instack = atoi(buf);
   if( num > instack ) {
@@ -564,12 +570,12 @@ void print(int s) {
   char buf[FILEPATH_MAX];
   int i, stack_size;
 
-  soc_w(s, "size");
+  soc_w(s, CMD_SIZE);
   soc_r(s, buf, MSG_MAX);
   stack_size = atoi(buf);
   printf("%d file%s in stack\n", stack_size, PLURALS(stack_size));
   for( i = 0; i < stack_size; i++ ) {
-    soc_w(s, "pick");
+    soc_w(s, CMD_PICK);
     sprintf(buf, "%d", i);
     soc_w(s, buf);
     if( !read_status_okay(s) ) {
@@ -587,7 +593,7 @@ void stop_daemon(int s) {
      Ask the user first, if the stack isn't empty. */
   char buf[MSG_MAX];
 
-  soc_w(s, "size");
+  soc_w(s, CMD_SIZE);
   soc_r(s, buf, MSG_MAX);
   if( atoi(buf) > 0 ) {
     printf("Stack not empty, still stop daemon [Yn]?");
@@ -605,7 +611,7 @@ void stop_daemon(int s) {
       break;
     }
   }
-  soc_w(s, "stop");
+  soc_w(s, CMD_STOP);
   if( read_status_okay(s) )
     printf("Server shutting down.\n");
   else
@@ -784,7 +790,7 @@ void action_pop(int s, struct Action action, bool interactive) {
   char buf[FILEPATH_MAX], *source, *dest, **exargv, *verb=action_verb(action.type);
   bool remote_error=false;
 
-  soc_w(s, "size");
+  soc_w(s, CMD_SIZE);
   soc_r(s, buf, MSG_MAX);
   if( action.num > atoi(buf) ) {
     fprintf(stderr, "asked to %s %d file%s, only %d in stack\n",
@@ -792,7 +798,7 @@ void action_pop(int s, struct Action action, bool interactive) {
     exit(EXIT_FAILURE);
   }
 
-  soc_w(s, "peek");
+  soc_w(s, CMD_PEEK);
   if( !read_status_okay(s) )
     remote_error = true;
   if( soc_r(s, buf, FILEPATH_MAX) <= 0 ) {
@@ -827,7 +833,7 @@ void action_pop(int s, struct Action action, bool interactive) {
   }
   free(dest);
   free(exargv);
-  soc_w(s, "pop");
+  soc_w(s, CMD_POP);
   stack_state = "stack state debatable";
   if( !read_status_okay(s) ) {
     fprintf(stderr, "%s could not confirm pop from stack (%s)\n", prefix, stack_state);
@@ -982,7 +988,7 @@ bool daemon_serve(int s, char *cmd) {
   char buf[FILEPATH_MAX];
   bool keep_running=true;
 
-  if( strcmp(cmd, "push") == 0 ) {
+  if( strcmp(cmd, CMD_PUSH) == 0 ) {
     char *status;
     if( stack_len(stack) >= STACK_MAX ) {
       printf("daemon: push request failed (stack full)\n");
@@ -1003,7 +1009,7 @@ bool daemon_serve(int s, char *cmd) {
     soc_w(s, status);
     soc_w(s, buf);
 
-  } else if( strcmp(cmd, "pop") == 0 ) {
+  } else if( strcmp(cmd, CMD_POP) == 0 ) {
     char *status;
     if( stack_len(stack) > 0 ) {
       status = MSG_SUCCESS;
@@ -1018,7 +1024,7 @@ bool daemon_serve(int s, char *cmd) {
     soc_w(s, status);
     soc_w(s, buf);
 
-  } else if( strcmp(cmd, "peek") == 0 ) {
+  } else if( strcmp(cmd, CMD_PEEK) == 0 ) {
     char *status;
     if( stack_len(stack) > 0 ) {
       status = MSG_SUCCESS;
@@ -1030,7 +1036,7 @@ bool daemon_serve(int s, char *cmd) {
     soc_w(s, status);
     soc_w(s, buf);
 
-  } else if( strcmp(cmd, "pick") == 0 ) {
+  } else if( strcmp(cmd, CMD_PICK) == 0 ) {
     char *picked;
     soc_r(s, buf, MSG_MAX);
     picked = stack_nth(atoi(buf), stack);
@@ -1042,11 +1048,11 @@ bool daemon_serve(int s, char *cmd) {
       soc_w(s, picked);
     }
 
-  } else if( strcmp(cmd, "size") == 0 ) {
+  } else if( strcmp(cmd, CMD_SIZE) == 0 ) {
     sprintf(buf, "%d", stack_len(stack));
     soc_w(s, buf);
 
-  } else if( strcmp(cmd, "stop") == 0 ) {
+  } else if( strcmp(cmd, CMD_STOP) == 0 ) {
     printf("daemon: Shutting down...\n");
     soc_w(s, MSG_SUCCESS);
     keep_running = false;
