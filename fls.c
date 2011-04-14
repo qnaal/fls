@@ -22,6 +22,7 @@
 #define MSG_ERR_STACK_FULL "file stack full"
 #define MSG_ERR_LENGTH "file path too long"
 #define EXEC_ARG_MAX 6
+#define PLURALS(int) (int == 1 ? "" : "s")
 
 typedef struct StackNode {
   char *dat;
@@ -537,6 +538,27 @@ bool drop(int s) {
   }
 }
 
+void multidrop(int s, int num) {
+  /* Drop <num> files from stack. */
+  char buf[MSG_MAX];
+  int i, instack;
+
+  soc_w(s, "size");
+  soc_r(s, buf, MSG_MAX);
+  instack = atoi(buf);
+  if( num > instack ) {
+    fprintf(stderr, "asked to drop %d file%s, only %d in stack\n",
+	    num, PLURALS(num), instack);
+    exit(EXIT_FAILURE);
+  }
+  for( i = 0; i < num; i++ ) {
+    if( !drop(s) ) {
+      printf("popped %d file%s\n", i, PLURALS(i));
+      exit(EXIT_FAILURE);
+    }
+  }
+}
+
 void print(int s) {
   /* Print the contents of the stack for the user. */
   char buf[FILEPATH_MAX];
@@ -545,7 +567,7 @@ void print(int s) {
   soc_w(s, "size");
   soc_r(s, buf, MSG_MAX);
   stack_size = atoi(buf);
-  printf("%d file%s in stack\n", stack_size, (stack_size == 1) ? "" : "s");
+  printf("%d file%s in stack\n", stack_size, PLURALS(stack_size));
   for( i = 0; i < stack_size; i++ ) {
     soc_w(s, "pick");
     sprintf(buf, "%d", i);
@@ -729,8 +751,16 @@ bool cmd_report(struct Action action, char *source, char *dest, bool interactive
 void action_pop(int s, struct Action action, bool interactive) {
   /* <action> the top file from the stack, and pop it. */
   char *prefix="action_pop:", *stack_state="stack not altered";
-  char buf[FILEPATH_MAX], *source, *dest, **exargv;
+  char buf[FILEPATH_MAX], *source, *dest, **exargv, *verb=action_verb(action.type);
   bool remote_error=false;
+
+  soc_w(s, "size");
+  soc_r(s, buf, MSG_MAX);
+  if( action.num > atoi(buf) ) {
+    fprintf(stderr, "asked to %s %d file%s, only %d in stack\n",
+	    verb, action.num, PLURALS(action.num), atoi(buf));
+    exit(EXIT_FAILURE);
+  }
 
   soc_w(s, "peek");
   if( !read_status_okay(s) )
@@ -741,7 +771,7 @@ void action_pop(int s, struct Action action, bool interactive) {
   }
   if( remote_error ) {
     if( strcmp(buf, MSG_ERR_STACK_EMPTY) == 0 )
-      printf("Could not pop; file stack empty\n");
+      printf("Could not %s; file stack empty\n", verb);
     else
       fprintf(stderr, "%s received error `%s' (%s)\n", prefix, buf, stack_state);
     exit(EXIT_FAILURE);
@@ -827,12 +857,7 @@ void action_do(struct Action action, int s) {
   case DROP:
     if( verbose )
       printf("drop\n");
-    for( i = 0; i < action.num; i++ ) {
-      if( !drop(s) ) {
-	printf("popped %d file%s\n", i, i == 1 ? "" : "s");
-	exit(EXIT_FAILURE);
-      }
-    }
+    multidrop(s, action.num);
     break;
   case NOTHING:
   case PRINT:
