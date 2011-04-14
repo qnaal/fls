@@ -582,6 +582,36 @@ void print(int s) {
   }
 }
 
+void stop_daemon(int s) {
+  /* Stop the daemon process.
+     Ask the user first, if the stack isn't empty. */
+  char buf[MSG_MAX];
+
+  soc_w(s, "size");
+  soc_r(s, buf, MSG_MAX);
+  if( atoi(buf) > 0 ) {
+    printf("Stack not empty, still stop daemon [Yn]?");
+    if( fgets(buf, MSG_MAX, stdin) == NULL ) {
+      printf("error reading from stdin\n");
+      exit(EXIT_FAILURE);
+    }
+    switch (buf[0]) {
+    case '\n':
+    case 'Y': case 'y':
+      break;
+    default:
+      printf("Canceled by user\n");
+      exit(EXIT_FAILURE);
+      break;
+    }
+  }
+  soc_w(s, "stop");
+  if( read_status_okay(s) )
+    printf("Server shutting down.\n");
+  else
+    printf("It doesn't want to.\n");
+}
+
 char **cmd_gen(struct Action action, char *source, char *dest) {
   /* Return the shell command (in the form of a null-terminated argv)
      that would perform <action> between <source> and <dest>. */
@@ -846,7 +876,7 @@ void action_do(struct Action action, int s) {
   /* Invoke the proper handler for <action>. */
   int i;
 
-  switch(action.type) {
+  switch (action.type) {
   case PUSH:
     if( verbose )
       printf("push\n");
@@ -877,8 +907,7 @@ void action_do(struct Action action, int s) {
     interactive(s);
     break;
   case STOP:
-    soc_w(s, "stop");
-    printf("Server shutting down.\n");
+    stop_daemon(s);
     break;
   }
 }
@@ -1019,8 +1048,7 @@ bool daemon_serve(int s, char *cmd) {
 
   } else if( strcmp(cmd, "stop") == 0 ) {
     printf("daemon: Shutting down...\n");
-    strcpy(buf, "Okay, I'm shutting down");
-    soc_w(s, buf);
+    soc_w(s, MSG_SUCCESS);
     keep_running = false;
 
   } else {
