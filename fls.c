@@ -700,8 +700,13 @@ char *real_target(char *reltarget) {
       givenbase = xstrdup(reltarget);
       base = basename(givenbase);
 
-      target = xmalloc(strlen(dir) +1+ strlen(base) +1);
-      sprintf(target, "%s/%s", dir, base);
+      if( strcmp(dir, "/") == 0 ) {
+	target = xmalloc(1+ strlen(base) +1);
+	sprintf(target, "/%s", base);
+      } else {
+	target = xmalloc(strlen(dir) +1+ strlen(base) +1);
+	sprintf(target, "%s/%s", dir, base);
+      }
       free(givendir);
       free(dir);
       free(givenbase);
