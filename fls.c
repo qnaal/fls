@@ -168,10 +168,12 @@ bool isdir(char *path) {
   /* Return whether <path> is a directory. */
   struct stat st;
   if( stat(path, &st) == -1 ) {
-    perror("stat");
-    exit(EXIT_FAILURE);
-  }
-  if( S_ISDIR(st.st_mode) )
+    if( errno != EFAULT ) {
+      /* terminate for any error other than "file doesn't exist" */
+      perror("stat");
+      exit(EXIT_FAILURE);
+    }
+  } else if( S_ISDIR(st.st_mode) )
     return true;
   return false;
 }
@@ -365,6 +367,32 @@ void sig_ignore(int signum) {
  * Client functions
  */
 
+char* abs_path(char *relpath) {
+  /* Return the absolute path to file <relpath>, with a slash at the end
+     if it is a dir.
+     Return NULL if the file at <relpath> does not exist.
+     Terminate if any other component of the path does not exist. */
+  char* path;
+
+  path = realpath(relpath, NULL);
+  if( path == NULL ) {
+    if( errno != ENOENT ) {
+      perror("realpath");
+      exit(EXIT_FAILURE);
+    }
+    return NULL;
+  }
+  if( isdir(path) && strcmp(path, "/") != 0 ) {
+    path = realloc(path, strlen(path) +2);
+    if( path == NULL ) {
+      fprintf(stderr, "realloc failed\n");
+      exit(EXIT_FAILURE);
+    }
+    memcpy(&(path[strlen(path)]), "/", 2);
+  }
+  return path;
+}
+
 struct ActionDef *action_def(enum ActionType type) {
   /* Return a pointer to the ActionDef matching <type>, or NULL if there
      was no match. */
@@ -499,9 +527,9 @@ void push(int s, char *file) {
     exit(EXIT_FAILURE);
   }
 
-  fullpath = realpath(file, NULL);
+  fullpath = abs_path(file);
   if( fullpath == NULL ) {
-    perror("realpath");
+    fprintf(stderr, "%s: file `%s' does not exist\n", program_name, file);
     exit(EXIT_FAILURE);
   }
   soc_w(s, fullpath);
@@ -685,35 +713,33 @@ char *real_target(char *reltarget) {
      Terminate if any component of the path but the last doesn't exist. */
   char *target;
 
-  target = realpath((reltarget == NULL ? "." : reltarget), NULL);
+  target = abs_path((reltarget == NULL ? "." : reltarget));
   if( target == NULL ) {
-    if( errno == ENOENT ) {
-      char *dir, *base, *givendir, *givenbase;
+    char *dir, *base, *givendir, *givenbase;
 
-      givendir = xstrdup(reltarget);
-      dir = realpath(dirname(givendir), NULL);
-      if( dir == NULL ) {
-	perror("realpath");
-	exit(EXIT_FAILURE);
-      }
-
-      givenbase = xstrdup(reltarget);
-      base = basename(givenbase);
-
-      if( strcmp(dir, "/") == 0 ) {
-	target = xmalloc(1+ strlen(base) +1);
-	sprintf(target, "/%s", base);
-      } else {
-	target = xmalloc(strlen(dir) +1+ strlen(base) +1);
-	sprintf(target, "%s/%s", dir, base);
-      }
-      free(givendir);
-      free(dir);
-      free(givenbase);
-    } else {
-      perror("realpath");
+    /* make copies of everything because I can't trust
+       dirname and basename to do anything right */
+    givendir = xstrdup(reltarget);
+    dir = abs_path(dirname(givendir));
+    if( dir == NULL ) {
+      fprintf(stderr, "%s: target directory `%s' does not exist\n",
+	      program_name, dirname(reltarget));
       exit(EXIT_FAILURE);
     }
+
+    givenbase = xstrdup(reltarget);
+    base = basename(givenbase);
+
+    if( strcmp(dir, "/") == 0 ) {
+      target = xmalloc(1+ strlen(base) +1);
+      sprintf(target, "/%s", base);
+    } else {
+      target = xmalloc(strlen(dir) + strlen(base) +1);
+      sprintf(target, "%s%s", dir, base);
+    }
+    free(givendir);
+    free(dir);
+    free(givenbase);
   }
   return target;
 }
