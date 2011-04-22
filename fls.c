@@ -118,8 +118,6 @@ Options:\n\
 ");
     printf("\
 \n\
-All but the last entered action are ignored.\n\
-\n\
 If no args are provided, the default action is PRINT.\n\
 \n\
 If FILEs are provided, push them onto the stack.\n\
@@ -423,6 +421,18 @@ char *action_verb(enum ActionType type) {
   return def->verb;
 }
 
+void action_set(struct Action *action, enum ActionType type) {
+  /* Set <action> to <type>, complaining if it has been set before. */
+
+  if( action->type == NOTHING )
+    action->type = type;
+  else {
+    fprintf(stderr, "%s: cannot perform two actions (%s, %s)\n",
+	    program_name, action_verb(action->type), action_verb(type));
+    usage(EXIT_FAILURE);
+  }
+}
+
 struct Action handle_options(int argc, char **exargv) {
   /* Return the proper action to take. */
   struct Action action = {NOTHING, 1, NULL};
@@ -431,25 +441,25 @@ struct Action handle_options(int argc, char **exargv) {
   while( (c = getopt(argc, exargv, "cmsdpiqvn:h")) != -1 ) {
     switch (c) {
     case 'c':
-      action.type = COPY;
+      action_set(&action, COPY);
       break;
     case 'm':
-      action.type = MOVE;
+      action_set(&action, MOVE);
       break;
     case 's':
-      action.type = SYMLINK;
+      action_set(&action, SYMLINK);
       break;
     case 'd':
-      action.type = DROP;
+      action_set(&action, DROP);
       break;
     case 'p':
-      action.type = PRINT;
+      action_set(&action, PRINT);
       break;
     case 'i':
-      action.type = INTERACTIVE;
+      action_set(&action, INTERACTIVE);
       break;
     case 'q':
-      action.type = STOP;
+      action_set(&action, STOP);
       break;
     case 'v':
       verbose++;
@@ -472,7 +482,7 @@ struct Action handle_options(int argc, char **exargv) {
       printf("arg provided\n");
     switch (action.type) {
     case NOTHING:
-      action.type = PUSH;
+      action_set(&action, PUSH);
       action.num = argc - optind;
       action.ptr = &exargv[optind];
       break;
