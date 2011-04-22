@@ -584,10 +584,10 @@ bool drop(int s) {
     exit(EXIT_FAILURE);
   }
   if( okay ) {
-    printf("Popped `%s'\n", buf);
+    printf("%s\n", buf);
     return true;
   } else {
-    printf("error: `%s'\n", buf);
+    fprintf(stderr, "error: `%s'\n", buf);
     return false;
   }
 }
@@ -601,8 +601,11 @@ void multidrop(int s, int num) {
   soc_r(s, buf, MSG_MAX);
   instack = atoi(buf);
   if( num > instack ) {
-    fprintf(stderr, "asked to drop %d file%s, only %d in stack\n",
-	    num, PLURALS(num), instack);
+    if( instack == 0 )
+      fprintf(stderr, "%s: cannot pop, file stack empty\n", program_name);
+    else
+      fprintf(stderr, "%s: asked to drop %d file%s, only %d in stack\n",
+	      program_name, num, PLURALS(num), instack);
     exit(EXIT_FAILURE);
   }
   for( i = 0; i < num; i++ ) {
@@ -840,12 +843,17 @@ void action_pop(int s, struct Action action, bool interactive) {
   char *prefix="action_pop:", *stack_state="stack not altered";
   char buf[FILEPATH_MAX], *source, *dest, **exargv, *verb=action_verb(action.type);
   bool remote_error=false;
+  int instack;
 
   soc_w(s, CMD_SIZE);
   soc_r(s, buf, MSG_MAX);
-  if( action.num > atoi(buf) ) {
-    fprintf(stderr, "asked to %s %d file%s, only %d in stack\n",
-	    verb, action.num, PLURALS(action.num), atoi(buf));
+  instack = atoi(buf);
+  if( action.num > instack ) {
+    if( instack == 0 )
+      fprintf(stderr, "%s: cannot pop, file stack empty\n", program_name);
+    else
+      fprintf(stderr, "%s: asked to %s %d file%s, only %d in stack\n",
+	      program_name, verb, action.num, PLURALS(action.num), instack);
     exit(EXIT_FAILURE);
   }
 
