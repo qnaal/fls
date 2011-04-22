@@ -43,6 +43,7 @@ struct Action {
     PRINT,
     COPY,
     MOVE,
+    SYMLINK,
     INTERACTIVE,
     STOP,
   } type;
@@ -61,8 +62,9 @@ struct ActionDef actions[] = {
   {PUSH,        "push",  {NULL}, 0, 0},
   {DROP,        "drop",  {NULL}, 0, 0},
   {PRINT,       "print", {NULL}, 0, 0},
-  {COPY,        "copy",  {"/bin/cp", "-r", "--", NULL, NULL, NULL}, 3, 4},
-  {MOVE,        "move",  {"/bin/mv", "--", NULL, NULL, NULL},       2, 3},
+  {COPY,        "copy",    {"/bin/cp", "-r", "--", NULL, NULL, NULL}, 3, 4},
+  {MOVE,        "move",    {"/bin/mv", "--", NULL, NULL, NULL},       2, 3},
+  {SYMLINK,     "symlink", {"/bin/ln", "-s", "--", NULL, NULL, NULL}, 3, 4},
   {INTERACTIVE, "interactive mode", {NULL}, 0, 0},
   {STOP,        "terminate daemon", {NULL}, 0, 0},
   {NOTHING}
@@ -95,8 +97,12 @@ Actions:\n\
           pop a file from the stack, copy it to DEST or current dir\n\
   -m    MOVE\n\
           pop a file from the stack, move it to DEST or current dir\n\
+  -s    SYMLINK\n\
+          pop a file from the stack, symlink it to DEST or current dir\n\
   -d    DROP\n\
           pop a file from the stack, print its name\n\
+");
+    printf("\
   -p    PRINT\n\
           print the contents of the stack\n\
   -q    QUIT\n\
@@ -107,7 +113,7 @@ Actions:\n\
     printf("\
 \n\
 Options:\n\
-  -n N  (available for COPY, MOVE, and DROP)\n\
+  -n N  (available for COPY, MOVE, SYMLINK, and DROP)\n\
           perform action to the top N files on the stack\n\
 ");
     printf("\
@@ -422,13 +428,16 @@ struct Action handle_options(int argc, char **exargv) {
   struct Action action = {NOTHING, 1, NULL};
   int c;
 
-  while( (c = getopt(argc, exargv, "cmdpiqvn:h")) != -1 ) {
+  while( (c = getopt(argc, exargv, "cmsdpiqvn:h")) != -1 ) {
     switch (c) {
     case 'c':
       action.type = COPY;
       break;
     case 'm':
       action.type = MOVE;
+      break;
+    case 's':
+      action.type = SYMLINK;
       break;
     case 'd':
       action.type = DROP;
@@ -469,6 +478,7 @@ struct Action handle_options(int argc, char **exargv) {
       break;
     case COPY:
     case MOVE:
+    case SYMLINK:
       if( (optind +1) < argc ) {
 	fprintf(stderr, "Too many supplied arguments for requested action: `%s'\n",
 		action_verb(action.type));
@@ -934,6 +944,7 @@ void action_do(struct Action action, int s) {
     break;
   case COPY:
   case MOVE:
+  case SYMLINK:
     if( verbose )
       printf("action_pop\n");
     action_pop(s, action, true);
