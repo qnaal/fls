@@ -518,12 +518,12 @@ void action_set(struct Action *action, enum ActionType type) {
   }
 }
 
-struct Action handle_options(int argc, char **exargv) {
+struct Action handle_options(int argc, char **argv) {
   /* Return the proper action to take. */
   struct Action action = {NOTHING, 1, NULL};
   int c;
 
-  while( (c = getopt(argc, exargv, "cmsdpiqvn:h")) != -1 ) {
+  while( (c = getopt(argc, argv, "cmsdpiqvn:h")) != -1 ) {
     switch (c) {
     case 'c':
       action_set(&action, COPY);
@@ -552,7 +552,7 @@ struct Action handle_options(int argc, char **exargv) {
     case 'n':
       action.num = atoi(optarg);
       if( action.num <= 0 ) {
-	fprintf(stderr, "invalid argument `%s' for option `%s'\n", optarg, exargv[optind]);
+	fprintf(stderr, "invalid argument `%s' for option `%c'\n", optarg, c);
 	usage(EXIT_FAILURE);
       }
       break;
@@ -569,7 +569,7 @@ struct Action handle_options(int argc, char **exargv) {
     case NOTHING:
       action_set(&action, PUSH);
       action.num = argc - optind;
-      action.ptr = &exargv[optind];
+      action.ptr = &argv[optind];
       break;
     case COPY:
     case MOVE:
@@ -579,7 +579,7 @@ struct Action handle_options(int argc, char **exargv) {
 		action_verb(action.type));
 	usage(EXIT_FAILURE);
       }
-      action.ptr = exargv[optind];
+      action.ptr = argv[optind];
       break;
     default:
       fprintf(stderr, "Requested action `%s' does not take arguments\n",
