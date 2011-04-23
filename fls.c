@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <libgen.h>
+#include <dirent.h>
 #include <sys/un.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -168,13 +169,28 @@ void log_output() {
   stderr = stdout;
 }
 
+bool exists(char *path) {
+  /* Return whether <path> exists on the filesystem. */
+  struct stat st;
+
+  if( stat(path, &st) == -1 ) {
+    if( errno == ENOENT ) {
+      return false;
+    }
+    perror("exists");
+    exit(EXIT_FAILURE);
+  }
+  return true;
+}
+
 bool isdir(char *path) {
   /* Return whether <path> is a directory. */
   struct stat st;
+
   if( stat(path, &st) == -1 ) {
-    if( errno != EFAULT ) {
+    if( errno != ENOENT ) {
       /* terminate for any error other than "file doesn't exist" */
-      perror("stat");
+      perror("isdir");
       exit(EXIT_FAILURE);
     }
   } else if( S_ISDIR(st.st_mode) )
@@ -365,6 +381,75 @@ void sig_ignore(int signum) {
     perror("sig_ignore: sigaction");
     exit(EXIT_FAILURE);
   }
+}
+
+/*
+ * Stack functions
+ */
+
+Node **stack_new() {
+  /* Return a blank stack. */
+  Node **stack=malloc(sizeof(*stack));
+
+  *stack = NULL;
+  return stack;
+}
+
+void stack_push(char *dat, Node **stack) {
+  /* Push <dat> onto <stack>. */
+  Node *new=xmalloc(sizeof(*new));
+
+  new->dat = xstrdup(dat);
+  new->next = *stack;
+  *stack = new;
+}
+
+bool stack_drop(Node **stack) {
+  /* Drop the top item from <stack>. */
+  Node *dropnode=*stack;
+
+  if( dropnode == NULL )
+    return false;
+  *stack = (*stack)->next;
+  free(dropnode->dat);
+  free(dropnode);
+  return true;
+}
+
+char *stack_peek(Node **stack) {
+  /* Return the top item of <stack>. */
+
+  return (*stack)->dat;
+}
+
+char *stack_nth(int n, Node **stack) {
+  /* Return the <n>th item of <stack>. */
+
+  if( n > 0 )
+    return stack_nth( n-1, &((*stack)->next) );
+  else
+    return stack_peek(stack);
+}
+
+int stack_len(Node **stack) {
+  /* Return the number of items in <stack>. */
+  Node *elt=*stack;
+  int i=0;
+
+  while( elt != NULL ) {
+    elt = elt->next;
+    i++;
+  }
+  return i;
+}
+
+void stack_free(Node **stack) {
+  /* Drop all items from <stack>. */
+  int i;
+
+  while( stack_drop(stack) )
+    ;
+  free(stack);
 }
 
 /*
@@ -838,6 +923,86 @@ bool cmd_report(struct Action action, char *source, char *dest, bool interactive
   return do_action;
 }
 
+int collision_check(int s, int n, char *dest) {
+  /* Check if any of the top <n> files in the stack would collide with anything
+     if they were all moved to <dest>.
+     Return the number of collisions with files in <dest>.
+     Terminate if any of said stack-files would collide with each other. */
+  char buf[FILEPATH_MAX], *collisions[n];
+  Node **stack=stack_new();
+  int i, ncol=0;
+  bool dest_is_dir=isdir(dest);
+
+  if( n > 1 && !dest_is_dir ) {
+    fprintf(stderr, "%s: multi-file target `%s' is not a directory\n",
+	    program_name, dest);
+    exit(EXIT_FAILURE);
+  }
+
+  for( i = 0; i < n; i++ ) {
+    int j;
+    char *to_push;
+    soc_w(s, CMD_PICK);
+    sprintf(buf, "%d", i);
+    soc_w(s, buf);
+    if( !read_status_okay(s) ) {
+      soc_r(s, buf, FILEPATH_MAX);
+      printf("received error `%s'\n", buf);
+      exit(EXIT_FAILURE);
+    }
+    soc_r(s, buf, FILEPATH_MAX);
+    to_push = basename(buf);
+
+    for( j = 0; j < i; j++ ) {
+      int ndx=i-j-1;	   /* where stack(j) is, in the daemon's stack */
+      if( strcmp(to_push, stack_nth(j, stack)) == 0 ) {
+	printf("Stack items %d and %d are both named `%s', \
+so I'm not going to let you do that.\n", i, ndx, to_push);
+	usage(EXIT_FAILURE);
+      }
+    }
+    stack_push(to_push, stack);
+  }
+
+  if( dest_is_dir ) {
+    for( i = 0; i < n; i++ ) {
+      DIR *dir=opendir(dest);
+      if( dir != NULL ) {
+	struct dirent *dent;
+	while( (dent = readdir(dir)) ) {
+	  char *dir_basename=dent->d_name;
+	  char *stack_basename=stack_nth(i, stack);
+	  if( strcmp(dir_basename, stack_basename) == 0 ) {
+	    collisions[ncol++] = stack_basename;
+	    break;
+	  }
+	}
+      } else {
+	perror("opendir");
+	exit(EXIT_FAILURE);
+      }
+      closedir(dir);
+    }
+  } else {
+    if( exists(dest) )
+      ncol++;
+  }
+
+  if( ncol ) {
+    if( !dest_is_dir ) {
+      printf("operation will overwrite `%s'\n", dest);
+    } else if( ncol == 1 ) {
+      printf("operation will overwrite `%s%s'\n", dest, collisions[0]);
+    } else {
+      printf("operation will overwrite %d file%s:\n", ncol, PLURALS(ncol));
+      for( i = 0; i < ncol; i++ )
+	puts(collisions[i]);
+    }
+  }
+  stack_free(stack);
+  return ncol;
+}
+
 void action_pop(int s, struct Action action, bool interactive) {
   /* <action> the top file from the stack, and pop it. */
   char *prefix="action_pop:", *stack_state="stack not altered";
@@ -874,10 +1039,8 @@ void action_pop(int s, struct Action action, bool interactive) {
   source = buf;
 
   dest = real_target(action.ptr);
-  if( action.num > 1 && !isdir(dest) ) {
-    fprintf(stderr, "%s: multi-file target `%s' is not a directory\n", program_name, dest);
-    exit(EXIT_FAILURE);
-  }
+  if( interactive )
+    collision_check(s, action.num, dest);
   if( verbose ) {
     printf("src: %s\n", source);
     printf("dst: %s\n", dest);
@@ -976,66 +1139,6 @@ void action_do(struct Action action, int s) {
     stop_daemon(s);
     break;
   }
-}
-
-/*
- * Stack functions
- */
-
-Node **new_stack() {
-  /* Return a blank stack. */
-  Node **stack=malloc(sizeof(*stack));
-
-  *stack = NULL;
-  return stack;
-}
-
-void stack_push(char *dat, Node **stack) {
-  /* Push <dat> onto the stack. */
-  Node *new=xmalloc(sizeof(*new));
-
-  new->dat = xstrdup(dat);
-  new->next = *stack;
-  *stack = new;
-}
-
-bool stack_drop(Node **stack) {
-  /* Drop the top item from the stack. */
-  Node *dropnode=*stack;
-
-  if( dropnode == NULL )
-    return false;
-  *stack = (*stack)->next;
-  free(dropnode->dat);
-  free(dropnode);
-  return true;
-}
-
-char *stack_peek(Node **stack) {
-  /* Return the top item of the stack. */
-
-  return (*stack)->dat;
-}
-
-char *stack_nth(int n, Node **stack) {
-  /* Return the <n>th item of the stack. */
-
-  if( n > 0 )
-    return stack_nth( n-1, &((*stack)->next) );
-  else
-    return stack_peek(stack);
-}
-
-int stack_len(Node **stack) {
-  /* Return the number of items in the stack. */
-  Node *elt=*stack;
-  int i=0;
-
-  while( elt != NULL ) {
-    elt = elt->next;
-    i++;
-  }
-  return i;
 }
 
 /*
