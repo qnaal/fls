@@ -1,4 +1,13 @@
-SRC = fls.c
+SRC = fls.c \
+      client.c \
+      daemon.c \
+      stack.c \
+      comm.c \
+      sig.c \
+      action.c \
+      client-daemon.c \
+      cmdexec.c \
+      file-info.c \
 
 CC = cc
 
