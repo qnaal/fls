@@ -102,7 +102,10 @@ bool cmd_report(struct Action action, char *source, char *dest, bool interactive
 	  printf("What?\n");
 	  break;
 	}
-	printf("%s `%s' to `%s'\n", verb, source, dest);
+	if( !cancel ) {
+	  printf("%s `%s' to `%s'\n", verb, source, dest);
+	  /* rest of operations are reported noninteractively */
+	}
       }
     } else {
       int read_again=true;
