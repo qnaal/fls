@@ -84,7 +84,10 @@ bool cmd_report(struct Action action, char *source, char *dest, bool interactive
     if( action.num > 1 ) {
       int read_again=true;
       while( read_again == true ) {
-	printf("%s %d files to `%s' [Yn]?", verb, action.num, dest);
+	char *destcolr = color_string(COLR_PATH, dest);
+	printf("%s %d files to `%s' [Yn]?", verb, action.num, destcolr);
+	free(destcolr);
+	
 	if( fgets(buf, MSG_MAX, stdin) == NULL ) {
 	  printf("error reading from stdin\n");
 	  exit(EXIT_FAILURE);
@@ -103,14 +106,22 @@ bool cmd_report(struct Action action, char *source, char *dest, bool interactive
 	  break;
 	}
 	if( !cancel ) {
-	  printf("%s `%s' to `%s'\n", verb, source, dest);
+	  char *sourcecolr = color_string(COLR_PATH, source);
+	  char *destcolr = color_string(COLR_PATH, dest);
+	  printf("%s `%s' to `%s'\n", verb, sourcecolr, destcolr);
+	  free(sourcecolr);
+	  free(destcolr);
 	  /* rest of operations are reported noninteractively */
 	}
       }
     } else {
       int read_again=true;
       while( read_again == true ) {
-	printf("%s `%s' to `%s' [Ynd]?", verb, source, dest);
+	char *sourcecolr = color_string(COLR_PATH, source);
+	char *destcolr = color_string(COLR_PATH, dest);
+	printf("%s `%s' to `%s' [Ynd]?", verb, sourcecolr, destcolr);
+	free(sourcecolr);
+	free(destcolr);
 	if( fgets(buf, MSG_MAX, stdin) == NULL ) {
 	  printf("error reading from stdin\n");
 	  exit(EXIT_FAILURE);
@@ -136,7 +147,11 @@ bool cmd_report(struct Action action, char *source, char *dest, bool interactive
       }
     }
   } else { 			/* !interactive */
-    printf("%s `%s' to `%s'\n", verb, source, dest);
+    char *sourcecolr = color_string(COLR_PATH, source);
+    char *destcolr = color_string(COLR_PATH, dest);
+    printf("%s `%s' to `%s'\n", verb, sourcecolr, destcolr);
+    free(sourcecolr);
+    free(destcolr);
   }
   if( cancel ) {
     printf("%s canceled by user\n", verb);

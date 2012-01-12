@@ -69,6 +69,14 @@ If FILEs are provided, push them onto the stack.\n\
   exit(status);
 }
 
+char* color_string(char *color,char *string) {
+  /* Return <string>, wrapped in <color> and COLR_CLR. */
+  char *colored = xmalloc(strlen(color) + strlen(string) + strlen(COLR_CLR) +1);
+  sprintf(colored, "%s%s%s", color, string, COLR_CLR);
+  return colored;
+}
+
+
 void set_program_name(const char *argv0) {
   /* Set program_name to argv0. */
 

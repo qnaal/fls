@@ -45,8 +45,10 @@ int collision_check(int s, int n, char *dest) {
     for( j = 0; j < i; j++ ) {
       int ndx=i-j-1;	   /* where stack(j) is, in the daemon's stack */
       if( strcmp(to_push, stack_nth(j, stack)) == 0 ) {
-	printf("Stack items %d and %d are both named `%s', \
-so I'm not going to let you do that.\n", i, ndx, to_push);
+	char *collisioncolr = color_string(COLR_PATH, to_push);
+	fprintf(stderr, "%s: Stack items %d and %d are both named `%s', \
+so I'm not going to let you do that.\n", program_name, i, ndx, collisioncolr);
+	free(collisioncolr);
 	usage(EXIT_FAILURE);
       }
     }
@@ -78,15 +80,23 @@ so I'm not going to let you do that.\n", i, ndx, to_push);
   }
 
   if( ncol ) {
+    char *ow = color_string(COLR_WARN, "overwrite");
     if( !dest_is_dir ) {
-      printf("operation will overwrite `%s'\n", dest);
+      char *destcolr = color_string(COLR_PATH, dest);
+      printf("operation will %s `%s'\n", ow, destcolr);
+      free(destcolr);
     } else if( ncol == 1 ) {
-      printf("operation will overwrite `%s%s'\n", dest, collisions[0]);
+      char *destcolr = color_string(COLR_PATH, dest);
+      char *filecolr = color_string(COLR_PATH, collisions[0]);
+      printf("operation will %s `%s%s'\n", ow, destcolr, filecolr);
+      free(filecolr);
+      free(destcolr);
     } else {
-      printf("operation will overwrite %d file%s:\n", ncol, PLURALS(ncol));
+      printf("operation will %s %d file%s:\n", ow, ncol, PLURALS(ncol));
       for( i = 0; i < ncol; i++ )
 	puts(collisions[i]);
     }
+    free(ow);
   }
   stack_free(stack);
   return ncol;

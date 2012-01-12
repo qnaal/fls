@@ -45,7 +45,10 @@ void push(int s, char *file) {
       fprintf(stderr, "%s error: path sent not the same as path pushed\n", prefix);
       exit(EXIT_FAILURE);
     }
-    printf("Pushed `%s'\n", fullpath);
+    char *fullpathcolr = color_string(COLR_PATH, fullpath);
+    printf("Pushed `%s'\n", fullpathcolr);
+    free(fullpathcolr);
+
   }
   free(fullpath);
 }
@@ -114,7 +117,9 @@ void print(int s) {
       exit(EXIT_FAILURE);
     }
     soc_r(s, buf, FILEPATH_MAX);
-    printf("%d: %s\n", i, buf);
+    char *filecolr = color_string(COLR_PATH, buf);
+    printf("%d: %s\n", i, filecolr);
+    free(filecolr);
   }
 }
 
