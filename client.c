@@ -3,9 +3,11 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <string.h>
 #include <libgen.h>
 #include "fls.h"
 #include "client.h"
+#include "client-daemon.h"
 #include "comm.h"
 #include "stack.h"
 #include "cmdexec.h"
