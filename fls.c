@@ -239,7 +239,7 @@ int main(int argc, char **argv) {
   if( bind(soc_listen, (struct sockaddr *)&local, sizeof(local)) == -1 ) {
     if( errno == EADDRINUSE ){
       if( verbose )
-	printf("Daemon already running.\n");
+	printf("Socket file exists. (%s)\n", soc_path);
     } else {
       perror("bind");
       exit(EXIT_FAILURE);

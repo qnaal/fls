@@ -149,6 +149,10 @@ int client_connect() {
   strcpy(sockaddr.sun_path, soc_path);
   len = strlen(sockaddr.sun_path) + sizeof(sockaddr.sun_family);
   if( connect(s, (struct sockaddr*)&sockaddr, len) == -1 ) {
+    if( errno == ECONNREFUSED ){
+      fprintf(stderr, "No-one listening at `%s'.\n", soc_path);
+      exit(EXIT_FAILURE);
+    }
     perror("connect");
     exit(EXIT_FAILURE);
   }
