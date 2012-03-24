@@ -114,7 +114,7 @@ void print(int s) {
       exit(EXIT_FAILURE);
     }
     soc_r(s, buf, FILEPATH_MAX);
-    printf("%d: %s\n", i, buf);
+    printf("%d: %s\n", i+1, buf);
   }
 }
 
