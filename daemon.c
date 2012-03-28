@@ -67,6 +67,7 @@ static bool daemon_serve(int s, char *cmd) {
 
   } else if( strcmp(cmd, CMD_PICK) == 0 ) {
     char *picked;
+    soc_w(s, MSG_SUCCESS);
     soc_r(s, buf, MSG_MAX);
     picked = stack_nth(atoi(buf), stack);
     if( picked == NULL ) {

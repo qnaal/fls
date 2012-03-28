@@ -14,7 +14,7 @@ CC = cc
 
 all: fls
 
-fls:
+fls: ${SRC}
 	@echo "compiling..."
 	@${CC} ${SRC} -o $@
 

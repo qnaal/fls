@@ -109,6 +109,11 @@ void print(int s) {
   printf("%d file%s in stack\n", stack_size, PLURALS(stack_size));
   for( i = 0; i < stack_size; i++ ) {
     soc_w(s, CMD_PICK);
+    if( !read_status_okay(s) ) {
+      soc_r(s, buf, FILEPATH_MAX);
+      printf("received error `%s'\n", buf);
+      exit(EXIT_FAILURE);
+    }
     sprintf(buf, "%d", i);
     soc_w(s, buf);
     if( !read_status_okay(s) ) {
@@ -118,7 +123,7 @@ void print(int s) {
     }
     soc_r(s, buf, FILEPATH_MAX);
     char *filecolr = color_string(COLR_PATH, buf);
-    printf("%d: %s\n", i, filecolr);
+    printf("%d: %s\n", i+1, filecolr);
     free(filecolr);
   }
 }

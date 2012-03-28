@@ -37,12 +37,16 @@ bool stack_drop(Node **stack) {
 char *stack_peek(Node **stack) {
   /* Return the top item of <stack>. */
 
+  if( *stack == NULL )
+    return NULL;
   return (*stack)->dat;
 }
 
 char *stack_nth(int n, Node **stack) {
   /* Return the <n>th item of <stack>. */
 
+  if( *stack == NULL )
+    return NULL;
   if( n > 0 )
     return stack_nth( n-1, &((*stack)->next) );
   else

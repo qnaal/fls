@@ -34,6 +34,11 @@ int collision_check(int s, int n, char *dest) {
     int j;
     char *to_push;
     soc_w(s, CMD_PICK);
+    if( !read_status_okay(s) ) {
+      soc_r(s, buf, FILEPATH_MAX);
+      printf("received error `%s'\n", buf);
+      exit(EXIT_FAILURE);
+    }
     sprintf(buf, "%d", i);
     soc_w(s, buf);
     if( !read_status_okay(s) ) {
